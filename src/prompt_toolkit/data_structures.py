@@ -1,11 +1,6 @@
 from __future__ import annotations
-
 from typing import NamedTuple
-
-__all__ = [
-    "Point",
-    "Size",
-]
+__all__ = ['Point', 'Size']
 
 
 class Point(NamedTuple):

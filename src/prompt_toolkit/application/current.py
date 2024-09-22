@@ -1,24 +1,13 @@
 from __future__ import annotations
-
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generator
-
 if TYPE_CHECKING:
     from prompt_toolkit.input.base import Input
     from prompt_toolkit.output.base import Output
-
     from .application import Application
-
-__all__ = [
-    "AppSession",
-    "get_app_session",
-    "get_app",
-    "get_app_or_none",
-    "set_app",
-    "create_app_session",
-    "create_app_session_from_tty",
-]
+__all__ = ['AppSession', 'get_app_session', 'get_app', 'get_app_or_none',
+    'set_app', 'create_app_session', 'create_app_session_from_tty']
 
 
 class AppSession:
@@ -38,46 +27,21 @@ class AppSession:
     :param output: Use this as a default output.
     """
 
-    def __init__(
-        self, input: Input | None = None, output: Output | None = None
-    ) -> None:
+    def __init__(self, input: (Input | None)=None, output: (Output | None)=None
+        ) ->None:
         self._input = input
         self._output = output
-
-        # The application will be set dynamically by the `set_app` context
-        # manager. This is called in the application itself.
         self.app: Application[Any] | None = None
 
-    def __repr__(self) -> str:
-        return f"AppSession(app={self.app!r})"
-
-    @property
-    def input(self) -> Input:
-        if self._input is None:
-            from prompt_toolkit.input.defaults import create_input
-
-            self._input = create_input()
-        return self._input
-
-    @property
-    def output(self) -> Output:
-        if self._output is None:
-            from prompt_toolkit.output.defaults import create_output
-
-            self._output = create_output()
-        return self._output
+    def __repr__(self) ->str:
+        return f'AppSession(app={self.app!r})'
 
 
 _current_app_session: ContextVar[AppSession] = ContextVar(
-    "_current_app_session", default=AppSession()
-)
+    '_current_app_session', default=AppSession())
 
 
-def get_app_session() -> AppSession:
-    return _current_app_session.get()
-
-
-def get_app() -> Application[Any]:
+def get_app() ->Application[Any]:
     """
     Get the current active (running) Application.
     An :class:`.Application` is active during the
@@ -96,26 +60,19 @@ def get_app() -> Application[Any]:
     (For applications like pymux where we can have more than one `Application`,
     we'll use a work-around to handle that.)
     """
-    session = _current_app_session.get()
-    if session.app is not None:
-        return session.app
-
-    from .dummy import DummyApplication
-
-    return DummyApplication()
+    pass
 
 
-def get_app_or_none() -> Application[Any] | None:
+def get_app_or_none() ->(Application[Any] | None):
     """
     Get the current active (running) Application, or return `None` if no
     application is running.
     """
-    session = _current_app_session.get()
-    return session.app
+    pass
 
 
 @contextmanager
-def set_app(app: Application[Any]) -> Generator[None, None, None]:
+def set_app(app: Application[Any]) ->Generator[None, None, None]:
     """
     Context manager that sets the given :class:`.Application` active in an
     `AppSession`.
@@ -126,45 +83,23 @@ def set_app(app: Application[Any]) -> Generator[None, None, None]:
     the case, use `contextvars.copy_context()`, or use `Application.context` to
     run it in the appropriate context.
     """
-    session = _current_app_session.get()
-
-    previous_app = session.app
-    session.app = app
-    try:
-        yield
-    finally:
-        session.app = previous_app
+    pass
 
 
 @contextmanager
-def create_app_session(
-    input: Input | None = None, output: Output | None = None
-) -> Generator[AppSession, None, None]:
+def create_app_session(input: (Input | None)=None, output: (Output | None)=None
+    ) ->Generator[AppSession, None, None]:
     """
     Create a separate AppSession.
 
     This is useful if there can be multiple individual `AppSession`s going on.
     Like in the case of an Telnet/SSH server.
     """
-    # If no input/output is specified, fall back to the current input/output,
-    # whatever that is.
-    if input is None:
-        input = get_app_session().input
-    if output is None:
-        output = get_app_session().output
-
-    # Create new `AppSession` and activate.
-    session = AppSession(input=input, output=output)
-
-    token = _current_app_session.set(session)
-    try:
-        yield session
-    finally:
-        _current_app_session.reset(token)
+    pass
 
 
 @contextmanager
-def create_app_session_from_tty() -> Generator[AppSession, None, None]:
+def create_app_session_from_tty() ->Generator[AppSession, None, None]:
     """
     Create `AppSession` that always prefers the TTY input/output.
 
@@ -179,11 +114,4 @@ def create_app_session_from_tty() -> Generator[AppSession, None, None]:
         with create_app_session_from_tty():
             prompt('>')
     """
-    from prompt_toolkit.input.defaults import create_input
-    from prompt_toolkit.output.defaults import create_output
-
-    input = create_input(always_prefer_tty=True)
-    output = create_output(always_prefer_tty=True)
-
-    with create_app_session(input=input, output=output) as app_session:
-        yield app_session
+    pass

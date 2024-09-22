@@ -1,4 +1,4 @@
-r"""
+"""
 Store input key strokes if we did read more than was required.
 
 The input classes `Vt100Input` and `Win32Input` read the input text in chunks
@@ -23,7 +23,7 @@ in bigger chunks.
 
 Further, line buffering is also not an option, because it doesn't work well in
 the architecture. We use lower level Posix APIs, that work better with the
-event loop and so on. In fact, there is also nothing that defines that only \n
+event loop and so on. In fact, there is also nothing that defines that only \\n
 can accept the input, you could create a key binding for any key to accept the
 input.
 
@@ -32,46 +32,29 @@ read too early, so that they can be feed into to the next `prompt()` call or to
 the next prompt_toolkit `Application`.
 """
 from __future__ import annotations
-
 from collections import defaultdict
-
 from ..key_binding import KeyPress
 from .base import Input
-
-__all__ = [
-    "store_typeahead",
-    "get_typeahead",
-    "clear_typeahead",
-]
-
+__all__ = ['store_typeahead', 'get_typeahead', 'clear_typeahead']
 _buffer: dict[str, list[KeyPress]] = defaultdict(list)
 
 
-def store_typeahead(input_obj: Input, key_presses: list[KeyPress]) -> None:
+def store_typeahead(input_obj: Input, key_presses: list[KeyPress]) ->None:
     """
     Insert typeahead key presses for the given input.
     """
-    global _buffer
-    key = input_obj.typeahead_hash()
-    _buffer[key].extend(key_presses)
+    pass
 
 
-def get_typeahead(input_obj: Input) -> list[KeyPress]:
+def get_typeahead(input_obj: Input) ->list[KeyPress]:
     """
     Retrieve typeahead and reset the buffer for this input.
     """
-    global _buffer
-
-    key = input_obj.typeahead_hash()
-    result = _buffer[key]
-    _buffer[key] = []
-    return result
+    pass
 
 
-def clear_typeahead(input_obj: Input) -> None:
+def clear_typeahead(input_obj: Input) ->None:
     """
     Clear typeahead buffer.
     """
-    global _buffer
-    key = input_obj.typeahead_hash()
-    _buffer[key] = []
+    pass

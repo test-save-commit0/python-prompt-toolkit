@@ -2,18 +2,11 @@
 Abstraction of CLI Input.
 """
 from __future__ import annotations
-
 from abc import ABCMeta, abstractmethod, abstractproperty
 from contextlib import contextmanager
 from typing import Callable, ContextManager, Generator
-
 from prompt_toolkit.key_binding import KeyPress
-
-__all__ = [
-    "Input",
-    "PipeInput",
-    "DummyInput",
-]
+__all__ = ['Input', 'PipeInput', 'DummyInput']
 
 
 class Input(metaclass=ABCMeta):
@@ -26,67 +19,75 @@ class Input(metaclass=ABCMeta):
     """
 
     @abstractmethod
-    def fileno(self) -> int:
+    def fileno(self) ->int:
         """
         Fileno for putting this in an event loop.
         """
+        pass
 
     @abstractmethod
-    def typeahead_hash(self) -> str:
+    def typeahead_hash(self) ->str:
         """
         Identifier for storing type ahead key presses.
         """
+        pass
 
     @abstractmethod
-    def read_keys(self) -> list[KeyPress]:
+    def read_keys(self) ->list[KeyPress]:
         """
         Return a list of Key objects which are read/parsed from the input.
         """
+        pass
 
-    def flush_keys(self) -> list[KeyPress]:
+    def flush_keys(self) ->list[KeyPress]:
         """
         Flush the underlying parser. and return the pending keys.
         (Used for vt100 input.)
         """
-        return []
+        pass
 
-    def flush(self) -> None:
-        "The event loop can call this when the input has to be flushed."
+    def flush(self) ->None:
+        """The event loop can call this when the input has to be flushed."""
         pass
 
     @abstractproperty
-    def closed(self) -> bool:
-        "Should be true when the input stream is closed."
-        return False
+    def closed(self) ->bool:
+        """Should be true when the input stream is closed."""
+        pass
 
     @abstractmethod
-    def raw_mode(self) -> ContextManager[None]:
+    def raw_mode(self) ->ContextManager[None]:
         """
         Context manager that turns the input into raw mode.
         """
+        pass
 
     @abstractmethod
-    def cooked_mode(self) -> ContextManager[None]:
+    def cooked_mode(self) ->ContextManager[None]:
         """
         Context manager that turns the input into cooked mode.
         """
+        pass
 
     @abstractmethod
-    def attach(self, input_ready_callback: Callable[[], None]) -> ContextManager[None]:
+    def attach(self, input_ready_callback: Callable[[], None]
+        ) ->ContextManager[None]:
         """
         Return a context manager that makes this input active in the current
         event loop.
         """
+        pass
 
     @abstractmethod
-    def detach(self) -> ContextManager[None]:
+    def detach(self) ->ContextManager[None]:
         """
         Return a context manager that makes sure that this input is not active
         in the current event loop.
         """
+        pass
 
-    def close(self) -> None:
-        "Close input."
+    def close(self) ->None:
+        """Close input."""
         pass
 
 
@@ -96,12 +97,14 @@ class PipeInput(Input):
     """
 
     @abstractmethod
-    def send_bytes(self, data: bytes) -> None:
+    def send_bytes(self, data: bytes) ->None:
         """Feed byte string into the pipe"""
+        pass
 
     @abstractmethod
-    def send_text(self, data: str) -> None:
+    def send_text(self, data: str) ->None:
         """Feed a text string into the pipe"""
+        pass
 
 
 class DummyInput(Input):
@@ -111,42 +114,3 @@ class DummyInput(Input):
     If used in an actual application, it will make the application render
     itself once and exit immediately, due to an `EOFError`.
     """
-
-    def fileno(self) -> int:
-        raise NotImplementedError
-
-    def typeahead_hash(self) -> str:
-        return "dummy-%s" % id(self)
-
-    def read_keys(self) -> list[KeyPress]:
-        return []
-
-    @property
-    def closed(self) -> bool:
-        # This needs to be true, so that the dummy input will trigger an
-        # `EOFError` immediately in the application.
-        return True
-
-    def raw_mode(self) -> ContextManager[None]:
-        return _dummy_context_manager()
-
-    def cooked_mode(self) -> ContextManager[None]:
-        return _dummy_context_manager()
-
-    def attach(self, input_ready_callback: Callable[[], None]) -> ContextManager[None]:
-        # Call the callback immediately once after attaching.
-        # This tells the callback to call `read_keys` and check the
-        # `input.closed` flag, after which it won't receive any keys, but knows
-        # that `EOFError` should be raised. This unblocks `read_from_input` in
-        # `application.py`.
-        input_ready_callback()
-
-        return _dummy_context_manager()
-
-    def detach(self) -> ContextManager[None]:
-        return _dummy_context_manager()
-
-
-@contextmanager
-def _dummy_context_manager() -> Generator[None, None, None]:
-    yield
