@@ -40,18 +40,24 @@ class History(metaclass=ABCMeta):
         were were appended to the history will be incorporated next time this
         method is called.
         """
-        pass
+        if not self._loaded:
+            self._loaded_strings = list(self.load_history_strings())
+            self._loaded = True
+
+        for item in reversed(self._loaded_strings):
+            yield item
 
     def get_strings(self) ->list[str]:
         """
         Get the strings from the history that are loaded so far.
         (In order. Oldest item first.)
         """
-        pass
+        return self._loaded_strings.copy()
 
     def append_string(self, string: str) ->None:
         """Add string to the history."""
-        pass
+        self._loaded_strings.append(string)
+        self.store_string(string)
 
     @abstractmethod
     def load_history_strings(self) ->Iterable[str]:
@@ -94,7 +100,33 @@ class ThreadedHistory(History):
         Like `History.load(), but call `self.load_history_strings()` in a
         background thread.
         """
-        pass
+        def load_in_thread():
+            with self._lock:
+                strings = list(self.history.load_history_strings())
+                self._loaded_strings.extend(strings)
+                for event in self._string_load_events:
+                    event.set()
+
+        if self._load_thread is None:
+            self._load_thread = threading.Thread(target=load_in_thread)
+            self._load_thread.daemon = True
+            self._load_thread.start()
+
+        loop = get_running_loop()
+        while True:
+            with self._lock:
+                if self._loaded_strings:
+                    string = self._loaded_strings.pop()
+                    yield string
+                elif self._load_thread.is_alive():
+                    event = threading.Event()
+                    self._string_load_events.append(event)
+                    with self._lock:
+                        if self._loaded_strings:
+                            continue
+                    await loop.run_in_executor(None, event.wait)
+                else:
+                    break
 
     def __repr__(self) ->str:
         return f'ThreadedHistory({self.history!r})'
@@ -115,11 +147,23 @@ class InMemoryHistory(History):
         else:
             self._storage = list(history_strings)
 
+    def load_history_strings(self) ->Iterable[str]:
+        return reversed(self._storage)
+
+    def store_string(self, string: str) ->None:
+        self._storage.append(string)
+
 
 class DummyHistory(History):
     """
     :class:`.History` object that doesn't remember anything.
     """
+
+    def load_history_strings(self) ->Iterable[str]:
+        return []
+
+    def store_string(self, string: str) ->None:
+        pass
 
 
 class FileHistory(History):
@@ -130,3 +174,13 @@ class FileHistory(History):
     def __init__(self, filename: str) ->None:
         self.filename = filename
         super().__init__()
+
+    def load_history_strings(self) ->Iterable[str]:
+        if os.path.exists(self.filename):
+            with open(self.filename, 'r', encoding='utf-8') as f:
+                for line in reversed(f.readlines()):
+                    yield line.rstrip('\n')
+
+    def store_string(self, string: str) ->None:
+        with open(self.filename, 'a', encoding='utf-8') as f:
+            f.write(string + '\n')
