@@ -21,7 +21,17 @@ def parse_color(text: str) ->str:
     Like in Pygments, but also support the ANSI color names.
     (These will map to the colors of the 16 color palette.)
     """
-    pass
+    if text in ANSI_COLOR_NAMES:
+        return text
+    if text.lower() in ANSI_COLOR_NAMES_ALIASES:
+        return ANSI_COLOR_NAMES_ALIASES[text.lower()]
+    if text.lower() in _named_colors_lowercase:
+        return _named_colors_lowercase[text.lower()]
+    if text.startswith('#') and len(text) in (4, 7, 9):
+        return text
+    if re.match(r'^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?([0-9a-fA-F]{2})?$', text):
+        return text
+    raise ValueError(f"Wrong color format: {text}")
 
 
 _EMPTY_ATTRS = Attrs(color=None, bgcolor=None, bold=None, underline=None,
@@ -34,7 +44,8 @@ def _expand_classname(classname: str) ->list[str]:
 
     E.g. 'a.b.c' becomes ['a', 'a.b', 'a.b.c']
     """
-    pass
+    parts = classname.split('.')
+    return ['.'.join(parts[:i+1]) for i in range(len(parts))]
 
 
 def _parse_style_str(style_str: str) ->Attrs:
@@ -42,7 +53,19 @@ def _parse_style_str(style_str: str) ->Attrs:
     Take a style string, e.g.  'bg:red #88ff00 class:title'
     and return a `Attrs` instance.
     """
-    pass
+    attrs = _EMPTY_ATTRS._asdict()
+    for part in style_str.split():
+        if part.startswith('bg:'):
+            attrs['bgcolor'] = parse_color(part[3:])
+        elif part.startswith('fg:') or part.startswith('color:'):
+            attrs['color'] = parse_color(part.split(':', 1)[1])
+        elif part in ('bold', 'italic', 'underline', 'strike', 'reverse', 'hidden'):
+            attrs[part] = True
+        elif part == 'blink':
+            attrs['blink'] = True
+        elif ':' not in part:
+            attrs['color'] = parse_color(part)
+    return Attrs(**attrs)
 
 
 CLASS_NAMES_RE = re.compile('^[a-z0-9.\\s_-]*$')
@@ -110,14 +133,34 @@ class Style(BaseStyle):
         :param style_dict: Style dictionary.
         :param priority: `Priority` value.
         """
-        pass
+        if priority == Priority.DICT_KEY_ORDER:
+            return cls(list(style_dict.items()))
+        else:  # Priority.MOST_PRECISE
+            return cls(sorted(
+                style_dict.items(),
+                key=lambda item: (-len(item[0].split()), item[0]),
+                reverse=True
+            ))
 
     def get_attrs_for_style_str(self, style_str: str, default: Attrs=
         DEFAULT_ATTRS) ->Attrs:
         """
         Get `Attrs` for the given style string.
         """
-        pass
+        list_of_attrs = [default]
+        class_names = set()
+
+        for part in style_str.split():
+            if part.startswith('class:'):
+                class_names.update(_expand_classname(part[6:]))
+            else:
+                list_of_attrs.append(_parse_style_str(part))
+
+        for names, attr in self.class_names_and_attrs:
+            if names & class_names:
+                list_of_attrs.append(attr)
+
+        return _merge_attrs(list_of_attrs)
 
 
 _T = TypeVar('_T')
@@ -129,14 +172,19 @@ def _merge_attrs(list_of_attrs: list[Attrs]) ->Attrs:
     Every `Attr` in the list can override the styling of the previous one. So,
     the last one has highest priority.
     """
-    pass
+    result = {}
+    for attr in list_of_attrs:
+        for k, v in attr._asdict().items():
+            if v is not None:
+                result[k] = v
+    return Attrs(**result)
 
 
 def merge_styles(styles: list[BaseStyle]) ->_MergedStyle:
     """
     Merge multiple `Style` objects.
     """
-    pass
+    return _MergedStyle(styles)
 
 
 class _MergedStyle(BaseStyle):
@@ -153,4 +201,13 @@ class _MergedStyle(BaseStyle):
     @property
     def _merged_style(self) ->Style:
         """The `Style` object that has the other styles merged together."""
-        pass
+        def get_style():
+            style_rules = []
+            for style in self.styles:
+                if isinstance(style, Style):
+                    style_rules.extend(style._style_rules)
+                elif isinstance(style, _MergedStyle):
+                    style_rules.extend(style._merged_style._style_rules)
+            return Style(style_rules)
+
+        return self._style.get(tuple(self.styles), get_style)
