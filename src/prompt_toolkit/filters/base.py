@@ -93,7 +93,10 @@ class _AndList(Filter):
         If there's only one unique filter in the given iterable, it will return
         that one filter instead of an `_AndList`.
         """
-        pass
+        unique_filters = list(set(filters))
+        if len(unique_filters) == 1:
+            return unique_filters[0]
+        return cls(unique_filters)
 
     def __call__(self) ->bool:
         return all(f() for f in self.filters)
@@ -119,7 +122,10 @@ class _OrList(Filter):
         If there's only one unique filter in the given iterable, it will return
         that one filter instead of an `_OrList`.
         """
-        pass
+        unique_filters = list(set(filters))
+        if len(unique_filters) == 1:
+            return unique_filters[0]
+        return cls(unique_filters)
 
     def __call__(self) ->bool:
         return any(f() for f in self.filters)
