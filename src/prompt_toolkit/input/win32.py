@@ -52,14 +52,14 @@ class Win32Input(_Win32InputBase):
         Return a context manager that makes this input active in the current
         event loop.
         """
-        pass
+        return attach_win32_input(self, input_ready_callback)
 
     def detach(self) ->ContextManager[None]:
         """
         Return a context manager that makes sure that this input is not active
         in the current event loop.
         """
-        pass
+        return detach_win32_input(self)
 
 
 class ConsoleInputReader:
@@ -106,7 +106,8 @@ class ConsoleInputReader:
 
     def close(self) ->None:
         """Close fdcon."""
-        pass
+        if self._fdcon is not None:
+            os.close(self._fdcon)
 
     def read(self) ->Iterable[KeyPress]:
         """
@@ -115,20 +116,49 @@ class ConsoleInputReader:
 
         http://msdn.microsoft.com/en-us/library/windows/desktop/ms684961(v=vs.85).aspx
         """
-        pass
+        max_records = 1024
+        records = (INPUT_RECORD * max_records)()
+        read = DWORD()
+
+        if windll.kernel32.ReadConsoleInputW(self.handle, records, max_records, pointer(read)):
+            return list(self._get_keys(read.value, records))
+        return []
 
     def _insert_key_data(self, key_press: KeyPress) ->KeyPress:
         """
         Insert KeyPress data, for vt100 compatibility.
         """
-        pass
+        if key_press.data:
+            return key_press
+
+        data = REVERSE_ANSI_SEQUENCES.get(key_press.key, '')
+        return KeyPress(key_press.key, data)
 
     def _get_keys(self, read: DWORD, input_records: Array[INPUT_RECORD]
         ) ->Iterator[KeyPress]:
         """
         Generator that yields `KeyPress` objects from the input records.
         """
-        pass
+        for i in range(read):
+            ir = input_records[i]
+
+            if ir.EventType == EventTypes.KEY_EVENT:
+                for key_press in self._event_to_key_presses(ir.Event.KeyEvent):
+                    yield self._insert_key_data(key_press)
+
+            elif ir.EventType == EventTypes.MOUSE_EVENT:
+                for key_press in self._handle_mouse(ir.Event.MouseEvent):
+                    yield key_press
+
+            elif ir.EventType == EventTypes.WINDOW_BUFFER_SIZE_EVENT:
+                yield KeyPress(Keys.WindowResize, '')
+
+        key_presses = list(self._merge_paired_surrogates(list(self._get_keys(read, input_records))))
+
+        if self.recognize_paste and self._is_paste(key_presses):
+            yield KeyPress(Keys.BracketedPaste, ''.join(k.data for k in key_presses))
+        else:
+            yield from key_presses
 
     @staticmethod
     def _merge_paired_surrogates(key_presses: list[KeyPress]) ->Iterator[
@@ -137,7 +167,16 @@ class ConsoleInputReader:
         Combines consecutive KeyPresses with high and low surrogates into
         single characters
         """
-        pass
+        i = 0
+        while i < len(key_presses):
+            if i + 1 < len(key_presses) and \
+               0xD800 <= ord(key_presses[i].data) <= 0xDBFF and \
+               0xDC00 <= ord(key_presses[i + 1].data) <= 0xDFFF:
+                yield KeyPress(key_presses[i].key, key_presses[i].data + key_presses[i + 1].data)
+                i += 2
+            else:
+                yield key_presses[i]
+                i += 1
 
     @staticmethod
     def _is_paste(keys: list[KeyPress]) ->bool:
@@ -148,19 +187,69 @@ class ConsoleInputReader:
         the best possible way to detect pasting of text and handle that
         correctly.)
         """
-        pass
+        return (
+            len(keys) > 1 and
+            all(k.key == Keys.ControlV or (
+                not isinstance(k.key, Keys) and
+                k.data is not None and
+                len(k.data) == 1
+            ) for k in keys)
+        )
 
     def _event_to_key_presses(self, ev: KEY_EVENT_RECORD) ->list[KeyPress]:
         """
         For this `KEY_EVENT_RECORD`, return a list of `KeyPress` instances.
         """
-        pass
+        result = []
+
+        if ev.KeyDown or ev.KeyDown == 0:  # In case of KeyUp, no unicode will be present.
+            if ev.UnicodeChar == '\x00':
+                if ev.VirtualKeyCode in self.keycodes:
+                    result.append(KeyPress(self.keycodes[ev.VirtualKeyCode], ''))
+            else:
+                result.append(KeyPress(ev.UnicodeChar, ev.UnicodeChar))
+
+        # Correctly handle Control-Arrow keys.
+        if (ev.ControlKeyState & self.LEFT_CTRL_PRESSED or
+            ev.ControlKeyState & self.RIGHT_CTRL_PRESSED) and ev.VirtualKeyCode in self.keycodes:
+            result.append(KeyPress(self.keycodes[ev.VirtualKeyCode], ''))
+
+        # Turn stateful shift/control/alt keys into individual events.
+        for k, v in [
+            (Keys.Shift, ev.ControlKeyState & self.SHIFT_PRESSED),
+            (Keys.Control, ev.ControlKeyState & self.LEFT_CTRL_PRESSED),
+            (Keys.Control, ev.ControlKeyState & self.RIGHT_CTRL_PRESSED),
+            (Keys.Alt, ev.ControlKeyState & self.LEFT_ALT_PRESSED),
+            (Keys.Alt, ev.ControlKeyState & self.RIGHT_ALT_PRESSED),
+        ]:
+            if v:
+                result.append(KeyPress(k, ''))
+
+        return result
 
     def _handle_mouse(self, ev: MOUSE_EVENT_RECORD) ->list[KeyPress]:
         """
         Handle mouse events. Return a list of KeyPress instances.
         """
-        pass
+        result = []
+
+        # Get mouse position.
+        position = ev.MousePosition.X, ev.MousePosition.Y
+
+        # Mouse event.
+        if ev.EventFlags in (0, MOUSE_MOVED):
+            # Button press or release.
+            if ev.ButtonState == FROM_LEFT_1ST_BUTTON_PRESSED:
+                result.append(KeyPress(Keys.MouseDown, ''))
+            elif ev.ButtonState == RIGHTMOST_BUTTON_PRESSED:
+                result.append(KeyPress(Keys.MouseDown, ''))
+            else:
+                result.append(KeyPress(Keys.MouseUp, ''))
+
+        elif ev.EventFlags & MOUSE_WHEELED:
+            result.append(KeyPress(Keys.ScrollUp if ev.ButtonState > 0 else Keys.ScrollDown, ''))
+
+        return result
 
 
 class _Win32Handles:
@@ -188,7 +277,30 @@ class _Win32Handles:
         """
         Add a Win32 handle to the event loop.
         """
-        pass
+        handle_value = handle.value
+
+        # Create an event object.
+        event = create_win32_event()
+        self._remove_events[handle_value] = event
+
+        # Add reader.
+        def ready() ->None:
+            del self._handle_callbacks[handle_value]
+            del self._remove_events[handle_value]
+            callback()
+
+        self._handle_callbacks[handle_value] = ready
+
+        # Start wait thread.
+        def wait_for_handle() ->None:
+            while True:
+                result = wait_for_handles([handle, event])
+                if result == 0:
+                    get_running_loop().call_soon_threadsafe(ready)
+                else:
+                    break
+
+        threading.Thread(target=wait_for_handle, daemon=True).start()
 
     def remove_win32_handle(self, handle: HANDLE) ->(Callable[[], None] | None
         ):
@@ -196,7 +308,15 @@ class _Win32Handles:
         Remove a Win32 handle from the event loop.
         Return either the registered handler or `None`.
         """
-        pass
+        handle_value = handle.value
+
+        if handle_value in self._handle_callbacks:
+            callback = self._handle_callbacks.pop(handle_value)
+            event = self._remove_events.pop(handle_value)
+            windll.kernel32.SetEvent(event)
+            return callback
+
+        return None
 
 
 @contextmanager
@@ -208,7 +328,18 @@ def attach_win32_input(input: _Win32InputBase, callback: Callable[[], None]
     :param input: :class:`~prompt_toolkit.input.Input` object.
     :param input_ready_callback: Called when the input is ready to read.
     """
-    pass
+    handle = input.console_input_reader.handle
+
+    def ready() ->None:
+        # When the console is ready, set the event.
+        callback()
+
+    input.win32_handles.add_win32_handle(handle, ready)
+
+    try:
+        yield
+    finally:
+        input.win32_handles.remove_win32_handle(handle)
 
 
 class raw_mode:
