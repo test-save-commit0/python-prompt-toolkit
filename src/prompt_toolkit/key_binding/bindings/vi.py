@@ -48,7 +48,7 @@ class TextObject:
         """
         Return a (start, end) tuple where start <= end.
         """
-        pass
+        return (min(self.start, self.end), max(self.start, self.end))
 
     def operator_range(self, document: Document) ->tuple[int, int]:
         """
@@ -59,19 +59,57 @@ class TextObject:
         This should return something that can be used in a slice, so the `end`
         position is *not* included.
         """
-        pass
+        start, end = self.sorted()
+        cursor_position = document.cursor_position
+
+        if self.type == TextObjectType.EXCLUSIVE:
+            return (cursor_position + start, cursor_position + end + 1)
+        elif self.type == TextObjectType.INCLUSIVE:
+            return (cursor_position + start, cursor_position + end + 1)
+        elif self.type == TextObjectType.LINEWISE:
+            start_line = document.line_count - 1 if start < 0 else document.cursor_position_row + start
+            end_line = document.line_count - 1 if end < 0 else document.cursor_position_row + end
+            return (document.get_start_of_line_position(start_line),
+                    min(document.get_end_of_line_position(end_line) + 1, len(document.text)))
+        else:  # BLOCK
+            return (cursor_position + start, cursor_position + end + 1)
 
     def get_line_numbers(self, buffer: Buffer) ->tuple[int, int]:
         """
         Return a (start_line, end_line) pair.
         """
-        pass
+        document = buffer.document
+        start, end = self.sorted()
+        cursor_row = document.cursor_position_row
+
+        if self.type in (TextObjectType.EXCLUSIVE, TextObjectType.INCLUSIVE):
+            start_line = document.translate_row_col_to_index(cursor_row + start, 0)
+            end_line = document.translate_row_col_to_index(cursor_row + end, 0)
+        elif self.type == TextObjectType.LINEWISE:
+            start_line = max(0, cursor_row + start)
+            end_line = min(document.line_count - 1, cursor_row + end)
+        else:  # BLOCK
+            start_line = cursor_row
+            end_line = cursor_row + end
+
+        return (start_line, end_line)
 
     def cut(self, buffer: Buffer) ->tuple[Document, ClipboardData]:
         """
         Turn text object into `ClipboardData` instance.
         """
-        pass
+        start, end = self.operator_range(buffer.document)
+        text = buffer.text[start:end]
+        
+        if self.type == TextObjectType.LINEWISE:
+            text += '\n'
+        
+        new_document = Document(
+            text=buffer.text[:start] + buffer.text[end:],
+            cursor_position=start
+        )
+        
+        return new_document, ClipboardData(text, self.type)
 
 
 TextObjectFunction = Callable[[E], TextObject]
@@ -83,7 +121,23 @@ def create_text_object_decorator(key_bindings: KeyBindings) ->Callable[...,
     """
     Create a decorator that can be used to register Vi text object implementations.
     """
-    pass
+    def decorator(*keys: str, filter: Filter=Always(), eager: bool=False):
+        def wrapper(func: _TOF) -> _TOF:
+            @key_bindings.add(*keys, filter=filter & vi_waiting_for_text_object_mode, eager=eager)
+            def _(event: E) -> None:
+                if event.app.vi_state.operator_func:
+                    text_object = func(event)
+                    event.app.vi_state.operator_func(event, text_object)
+                    event.app.vi_state.operator_func = None
+                    event.app.vi_state.operator_arg = None
+                else:
+                    # Move cursor.
+                    text_object = func(event)
+                    start, end = text_object.operator_range(event.app.current_buffer.document)
+                    event.app.current_buffer.cursor_position += start
+            return func
+        return wrapper
+    return decorator
 
 
 OperatorFunction = Callable[[E, TextObject], None]
@@ -95,7 +149,16 @@ def create_operator_decorator(key_bindings: KeyBindings) ->Callable[...,
     """
     Create a decorator that can be used for registering Vi operators.
     """
-    pass
+    def decorator(*keys: str, filter: Filter=Always(), eager: bool=False):
+        def wrapper(func: _OF) -> _OF:
+            @key_bindings.add(*keys, filter=filter & vi_navigation_mode, eager=eager)
+            def _(event: E) -> None:
+                event.app.vi_state.operator_func = func
+                event.app.vi_state.operator_arg = event.arg
+
+            return func
+        return wrapper
+    return decorator
 
 
 def load_vi_bindings() ->KeyBindingsBase:
