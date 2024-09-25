@@ -115,7 +115,10 @@ class KeyBindingsBase(metaclass=ABCMeta):
 
         :param keys: tuple of keys.
         """
-        pass
+        def get():
+            return [b for b in self._bindings if b.keys[:len(keys)] == keys and len(b.keys) > len(keys)]
+
+        return self._get_bindings_starting_with_keys_cache.get(keys, get)
 
     @abstractproperty
     def bindings(self) ->list[Binding]:
@@ -182,7 +185,15 @@ class KeyBindings(KeyBindingsBase):
         :param record_in_macro: Record these key bindings when a macro is
             being recorded. (True by default.)
         """
-        pass
+        def decorator(func: T) -> T:
+            if callable(func):
+                binding = Binding(keys, func, filter=filter, eager=eager,
+                                  is_global=is_global, save_before=save_before,
+                                  record_in_macro=record_in_macro)
+                self._bindings.append(binding)
+                self.__version += 1
+            return func
+        return decorator
 
     def remove(self, *args: (Keys | str | KeyHandlerCallable)) ->None:
         """
@@ -198,7 +209,20 @@ class KeyBindings(KeyBindingsBase):
             remove(handler)  # Pass handler.
             remove('c-x', 'c-a')  # Or pass the key bindings.
         """
-        pass
+        if len(args) == 1 and callable(args[0]):
+            handler = args[0]
+            bindings_to_remove = [b for b in self._bindings if b.handler == handler]
+        else:
+            keys = tuple(_parse_key(k) for k in args)
+            bindings_to_remove = [b for b in self._bindings if b.keys == keys]
+
+        if not bindings_to_remove:
+            raise ValueError("Binding not found")
+
+        for b in bindings_to_remove:
+            self._bindings.remove(b)
+        
+        self.__version += 1
     add_binding = add
     remove_binding = remove
 
@@ -210,7 +234,10 @@ class KeyBindings(KeyBindingsBase):
 
         :param keys: tuple of keys.
         """
-        pass
+        def get():
+            return [b for b in self._bindings if b.keys == keys]
+
+        return self._get_bindings_for_keys_cache.get(keys, get)
 
     def get_bindings_starting_with_keys(self, keys: KeysTuple) ->list[Binding]:
         """
@@ -228,7 +255,16 @@ def _parse_key(key: (Keys | str)) ->(str | Keys):
     """
     Replace key by alias and verify whether it's a valid one.
     """
-    pass
+    if isinstance(key, Keys):
+        return key
+    
+    if key in KEY_ALIASES:
+        return KEY_ALIASES[key]
+    
+    if len(key) == 1:
+        return key
+    
+    raise ValueError(f"Invalid key: {key}")
 
 
 def key_binding(filter: FilterOrBool=True, eager: FilterOrBool=False,
@@ -239,7 +275,17 @@ def key_binding(filter: FilterOrBool=True, eager: FilterOrBool=False,
     Decorator that turn a function into a `Binding` object. This can be added
     to a `KeyBindings` object when a key binding is assigned.
     """
-    pass
+    def decorator(func: KeyHandlerCallable) -> Binding:
+        return Binding(
+            keys=(),  # Empty tuple, as keys are not known at this point
+            handler=func,
+            filter=filter,
+            eager=eager,
+            is_global=is_global,
+            save_before=save_before,
+            record_in_macro=record_in_macro
+        )
+    return decorator
 
 
 class _Proxy(KeyBindingsBase):
