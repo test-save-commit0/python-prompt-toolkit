@@ -47,7 +47,9 @@ class Layout:
         """
         Find all the :class:`.UIControl` objects in this layout.
         """
-        pass
+        for item in self.walk():
+            if isinstance(item, Window):
+                yield item
 
     def focus(self, value: FocusableElement) ->None:
         """
@@ -62,50 +64,82 @@ class Layout:
           from this container that was focused most recent, or the very first
           focusable :class:`.Window` of the container.
         """
-        pass
+        if isinstance(value, UIControl):
+            for window in self.find_all_windows():
+                if window.content == value:
+                    self.current_window = window
+                    return
+        elif isinstance(value, Buffer):
+            for window in self.find_all_windows():
+                if isinstance(window.content, BufferControl) and window.content.buffer == value:
+                    self.current_window = window
+                    return
+        elif isinstance(value, str):
+            for window in self.find_all_windows():
+                if isinstance(window.content, BufferControl) and window.content.buffer.name == value:
+                    self.current_window = window
+                    return
+        elif isinstance(value, Window):
+            self.current_window = value
+        elif isinstance(value, Container):
+            for window in self.find_all_windows():
+                if window in value.get_children():
+                    self.current_window = window
+                    return
 
     def has_focus(self, value: FocusableElement) ->bool:
         """
         Check whether the given control has the focus.
         :param value: :class:`.UIControl` or :class:`.Window` instance.
         """
-        pass
+        if isinstance(value, UIControl):
+            return self.current_control == value
+        elif isinstance(value, Window):
+            return self.current_window == value
+        return False
 
     @property
     def current_control(self) ->UIControl:
         """
         Get the :class:`.UIControl` to currently has the focus.
         """
-        pass
+        return self.current_window.content
 
     @current_control.setter
     def current_control(self, control: UIControl) ->None:
         """
         Set the :class:`.UIControl` to receive the focus.
         """
-        pass
+        self.focus(control)
 
     @property
     def current_window(self) ->Window:
         """Return the :class:`.Window` object that is currently focused."""
-        pass
+        return self._stack[-1] if self._stack else None
 
     @current_window.setter
     def current_window(self, value: Window) ->None:
         """Set the :class:`.Window` object to be currently focused."""
-        pass
+        if value not in self._stack:
+            self._stack.append(value)
+        else:
+            self._stack.remove(value)
+            self._stack.append(value)
 
     @property
     def is_searching(self) ->bool:
         """True if we are searching right now."""
-        pass
+        return any(isinstance(c, SearchBufferControl) for c in self.search_links)
 
     @property
     def search_target_buffer_control(self) ->(BufferControl | None):
         """
         Return the :class:`.BufferControl` in which we are searching or `None`.
         """
-        pass
+        for search_control, buffer_control in self.search_links.items():
+            if self.has_focus(search_control):
+                return buffer_control
+        return None
 
     def get_focusable_windows(self) ->Iterable[Window]:
         """
@@ -219,4 +253,11 @@ def walk(container: Container, skip_hidden: bool=False) ->Iterable[Container]:
     """
     Walk through layout, starting at this container.
     """
-    pass
+    def walk_recursive(cont):
+        yield cont
+        if hasattr(cont, 'get_children'):
+            for child in cont.get_children():
+                if not skip_hidden or not isinstance(child, ConditionalContainer) or child.filter():
+                    yield from walk_recursive(child)
+
+    yield from walk_recursive(container)
