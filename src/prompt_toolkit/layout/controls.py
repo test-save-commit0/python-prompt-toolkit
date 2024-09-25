@@ -134,7 +134,25 @@ class UIContent:
             when line wrapping.
         :returns: The computed height.
         """
-        pass
+        # Create a unique key for caching
+        key = (lineno, width, get_line_prefix, slice_stop)
+        
+        if key not in self._line_heights_cache:
+            fragments = self.get_line(lineno)
+            
+            # Apply line prefix if provided
+            if get_line_prefix:
+                fragments = to_formatted_text(get_line_prefix(lineno, 0)) + fragments
+            
+            # Apply slice if provided
+            if slice_stop is not None:
+                fragments = fragments[:slice_stop]
+            
+            # Calculate the height
+            text = fragment_list_to_text(fragments)
+            self._line_heights_cache[key] = (len(text) - 1) // width + 1
+        
+        return self._line_heights_cache[key]
 
 
 class FormattedTextControl(UIControl):
@@ -206,14 +224,27 @@ class FormattedTextControl(UIControl):
         (This function is called several times during one rendering, because
         we also need those for calculating the dimensions.)
         """
-        pass
+        # Use SimpleCache to store the fragments
+        key = (self.text, get_app().render_counter)
+        
+        def get_formatted_text() ->StyleAndTextTuples:
+            result = to_formatted_text(self.text, style=self.style)
+            self._fragments = result
+            return result
+        
+        return self._fragment_cache.get(key, get_formatted_text)
 
     def preferred_width(self, max_available_width: int) ->int:
         """
         Return the preferred width for this control.
         That is the width of the longest line.
         """
-        pass
+        fragments = self._get_formatted_text_cached()
+        text = fragment_list_to_text(fragments)
+        lines = text.splitlines()
+        if not lines:
+            return 0
+        return max(get_cwidth(line) for line in lines)
 
     def preferred_height(self, width: int, max_available_height: int,
         wrap_lines: bool, get_line_prefix: (GetLinePrefixCallable | None)) ->(
@@ -221,7 +252,27 @@ class FormattedTextControl(UIControl):
         """
         Return the preferred height for this control.
         """
-        pass
+        fragments = self._get_formatted_text_cached()
+        
+        # If wrapping is disabled, return the number of lines
+        if not wrap_lines:
+            return len(split_lines(fragments))
+        
+        # If wrapping is enabled, calculate the wrapped height
+        height = 0
+        for line in split_lines(fragments):
+            # Apply line prefix if provided
+            if get_line_prefix:
+                line = to_formatted_text(get_line_prefix(height, 0)) + line
+            
+            # Calculate the height for this line
+            line_text = fragment_list_to_text(line)
+            height += (len(line_text) - 1) // width + 1
+            
+            if height >= max_available_height:
+                return max_available_height
+        
+        return height
 
     def mouse_handler(self, mouse_event: MouseEvent) ->NotImplementedOrNone:
         """
@@ -233,7 +284,22 @@ class FormattedTextControl(UIControl):
         :class:`~prompt_toolkit.layout.Window` to handle this particular
         event.)
         """
-        pass
+        fragments = self._get_formatted_text_cached()
+        x = mouse_event.position.x
+        y = mouse_event.position.y
+        
+        # Find the fragment at the given position
+        for style, text, handler in fragments:
+            if y == 0 and x < len(text):
+                if handler is not None:
+                    return handler(get_app(), mouse_event)
+                return NotImplemented
+            x -= len(text)
+            if x < 0:
+                y -= 1
+                x = 9999
+        
+        return NotImplemented
 
 
 class DummyControl(UIControl):
