@@ -58,7 +58,9 @@ def new_eventloop_with_inputhook(inputhook: Callable[[InputHookContext], None]
     """
     Create a new event loop with the given inputhook.
     """
-    pass
+    selector = selectors.SelectSelector()
+    loop = asyncio.SelectorEventLoop(InputHookSelector(selector, inputhook))
+    return loop
 
 
 def set_eventloop_with_inputhook(inputhook: Callable[[InputHookContext], None]
@@ -66,7 +68,9 @@ def set_eventloop_with_inputhook(inputhook: Callable[[InputHookContext], None]
     """
     Create a new event loop with the given inputhook, and activate it.
     """
-    pass
+    loop = new_eventloop_with_inputhook(inputhook)
+    asyncio.set_event_loop(loop)
+    return loop
 
 
 class InputHookSelector(BaseSelector):
@@ -88,4 +92,31 @@ class InputHookSelector(BaseSelector):
         """
         Clean up resources.
         """
-        pass
+        self.selector.close()
+        os.close(self._r)
+        os.close(self._w)
+
+    def register(self, fileobj: FileDescriptorLike, events: _EventMask, data: Any = None) -> SelectorKey:
+        return self.selector.register(fileobj, events, data)
+
+    def unregister(self, fileobj: FileDescriptorLike) -> SelectorKey:
+        return self.selector.unregister(fileobj)
+
+    def modify(self, fileobj: FileDescriptorLike, events: _EventMask, data: Any = None) -> SelectorKey:
+        return self.selector.modify(fileobj, events, data)
+
+    def select(self, timeout: float | None = None) -> list[tuple[SelectorKey, _EventMask]]:
+        ready = self.selector.select(timeout=0)
+        if ready:
+            return ready
+
+        def input_is_ready() -> bool:
+            return bool(self.selector.select(timeout=0))
+
+        context = InputHookContext(self._r, input_is_ready)
+        self.inputhook(context)
+
+        return self.selector.select(timeout=0)
+
+    def get_map(self) -> Mapping[FileDescriptorLike, SelectorKey]:
+        return self.selector.get_map()
