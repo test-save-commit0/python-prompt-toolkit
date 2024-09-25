@@ -71,28 +71,68 @@ def start_search(buffer_control: (BufferControl | None)=None, direction:
     :param buffer_control: Start search for this `BufferControl`. If not given,
         search through the current control.
     """
-    pass
+    app = get_app()
+    
+    if buffer_control is None:
+        buffer_control = app.layout.current_control
+
+    search_control = _get_reverse_search_links(app.layout).get(buffer_control)
+    
+    if search_control:
+        buffer_control.search_state = SearchState(direction=direction)
+        app.layout.focus(search_control)
+        search_control.buffer.reset()
 
 
 def stop_search(buffer_control: (BufferControl | None)=None) ->None:
     """
     Stop search through the given `buffer_control`.
     """
-    pass
+    app = get_app()
+    
+    if buffer_control is None:
+        buffer_control = app.layout.current_control
+
+    if buffer_control.search_state:
+        buffer_control.search_state = None
+        app.layout.focus(buffer_control)
 
 
 def do_incremental_search(direction: SearchDirection, count: int=1) ->None:
     """
     Apply search, but keep search buffer focused.
     """
-    pass
+    app = get_app()
+    search_control = app.layout.current_control
+
+    if isinstance(search_control, SearchBufferControl):
+        buffer_control = search_control.buffer_control
+        if buffer_control and buffer_control.search_state:
+            buffer_control.search_state.direction = direction
+            
+            for _ in range(count):
+                buffer_control.search(buffer_control.search_state.text,
+                                      direction,
+                                      count=1,
+                                      include_current_position=False)
 
 
 def accept_search() ->None:
     """
     Accept current search query. Focus original `BufferControl` again.
     """
-    pass
+    app = get_app()
+    search_control = app.layout.current_control
+
+    if isinstance(search_control, SearchBufferControl):
+        buffer_control = search_control.buffer_control
+        if buffer_control:
+            app.layout.focus(buffer_control)
+
+            # If we're in Vi mode and in navigation mode, go back to 
+            # insert mode.
+            if app.vi_state.input_mode == InputMode.NAVIGATION:
+                app.vi_state.input_mode = InputMode.INSERT
 
 
 def _get_reverse_search_links(layout: Layout) ->dict[BufferControl,
@@ -100,4 +140,8 @@ def _get_reverse_search_links(layout: Layout) ->dict[BufferControl,
     """
     Return mapping from BufferControl to SearchBufferControl.
     """
-    pass
+    result = {}
+    for search_control in layout.find_all_controls(lambda c: isinstance(c, SearchBufferControl)):
+        if search_control.buffer_control:
+            result[search_control.buffer_control] = search_control
+    return result
