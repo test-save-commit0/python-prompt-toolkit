@@ -52,7 +52,10 @@ class PromptToolkitSSHSession(asyncssh.SSHServerSession):
         """
         Callable that returns the current `Size`, required by Vt100_Output.
         """
-        pass
+        if self._chan is None:
+            return Size(rows=24, columns=80)  # Default size if channel is not available
+        width, height, _, _ = self._chan.get_terminal_size()
+        return Size(rows=height, columns=width)
 
 
 class PromptToolkitSSHServer(asyncssh.SSHServer):
