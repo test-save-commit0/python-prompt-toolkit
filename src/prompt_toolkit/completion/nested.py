@@ -57,4 +57,16 @@ class NestedCompleter(Completer):
 
         Values in this data structure can be a completers as well.
         """
-        pass
+        options: dict[str, Completer | None] = {}
+
+        for key, value in data.items():
+            if isinstance(value, Mapping):
+                options[key] = cls.from_nested_dict(value)
+            elif isinstance(value, Set):
+                options[key] = WordCompleter(list(value))
+            elif isinstance(value, Completer):
+                options[key] = value
+            else:
+                options[key] = None
+
+        return cls(options)
