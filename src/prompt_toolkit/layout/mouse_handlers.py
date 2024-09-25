@@ -29,4 +29,6 @@ class MouseHandlers:
         """
         Set mouse handler for a region.
         """
-        pass
+        for x in range(x_min, x_max + 1):
+            for y in range(y_min, y_max + 1):
+                self.mouse_handlers[x][y] = handler
