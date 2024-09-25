@@ -26,14 +26,17 @@ def register(name: str) ->Callable[[_T], _T]:
     """
     Store handler in the `_readline_commands` dictionary.
     """
-    pass
+    def decorator(handler: _T) ->_T:
+        _readline_commands[name] = handler
+        return handler
+    return decorator
 
 
 def get_by_name(name: str) ->Binding:
     """
     Return the handler for the (Readline) command with the given name.
     """
-    pass
+    return _readline_commands.get(name, lambda event: None)
 
 
 @register('beginning-of-buffer')
@@ -41,7 +44,7 @@ def beginning_of_buffer(event: E) ->None:
     """
     Move to the start of the buffer.
     """
-    pass
+    event.current_buffer.cursor_position = 0
 
 
 @register('end-of-buffer')
@@ -49,7 +52,7 @@ def end_of_buffer(event: E) ->None:
     """
     Move to the end of the buffer.
     """
-    pass
+    event.current_buffer.cursor_position = len(event.current_buffer.text)
 
 
 @register('beginning-of-line')
@@ -57,7 +60,7 @@ def beginning_of_line(event: E) ->None:
     """
     Move to the start of the current line.
     """
-    pass
+    event.current_buffer.cursor_position = event.current_buffer.document.get_start_of_line_position()
 
 
 @register('end-of-line')
@@ -65,7 +68,7 @@ def end_of_line(event: E) ->None:
     """
     Move to the end of the line.
     """
-    pass
+    event.current_buffer.cursor_position = event.current_buffer.document.get_end_of_line_position()
 
 
 @register('forward-char')
@@ -73,13 +76,13 @@ def forward_char(event: E) ->None:
     """
     Move forward a character.
     """
-    pass
+    event.current_buffer.cursor_right()
 
 
 @register('backward-char')
 def backward_char(event: E) ->None:
     """Move back a character."""
-    pass
+    event.current_buffer.cursor_left()
 
 
 @register('forward-word')
@@ -88,7 +91,7 @@ def forward_word(event: E) ->None:
     Move forward to the end of the next word. Words are composed of letters and
     digits.
     """
-    pass
+    event.current_buffer.cursor_right(event.current_buffer.document.find_next_word_ending())
 
 
 @register('backward-word')
@@ -97,7 +100,7 @@ def backward_word(event: E) ->None:
     Move back to the start of the current or previous word. Words are composed
     of letters and digits.
     """
-    pass
+    event.current_buffer.cursor_left(event.current_buffer.document.find_previous_word_beginning())
 
 
 @register('clear-screen')
@@ -105,7 +108,7 @@ def clear_screen(event: E) ->None:
     """
     Clear the screen and redraw everything at the top of the screen.
     """
-    pass
+    event.app.renderer.clear()
 
 
 @register('redraw-current-line')
@@ -114,7 +117,7 @@ def redraw_current_line(event: E) ->None:
     Refresh the current line.
     (Readline defines this command, but prompt-toolkit doesn't have it.)
     """
-    pass
+    event.app.invalidate()
 
 
 @register('accept-line')
@@ -122,7 +125,7 @@ def accept_line(event: E) ->None:
     """
     Accept the line regardless of where the cursor is.
     """
-    pass
+    event.current_buffer.validate_and_handle()
 
 
 @register('previous-history')
@@ -130,7 +133,7 @@ def previous_history(event: E) ->None:
     """
     Move `back` through the history list, fetching the previous command.
     """
-    pass
+    event.current_buffer.history_backward()
 
 
 @register('next-history')
@@ -138,7 +141,7 @@ def next_history(event: E) ->None:
     """
     Move `forward` through the history list, fetching the next command.
     """
-    pass
+    event.current_buffer.history_forward()
 
 
 @register('beginning-of-history')
@@ -146,7 +149,7 @@ def beginning_of_history(event: E) ->None:
     """
     Move to the first line in the history.
     """
-    pass
+    event.current_buffer.go_to_history(0)
 
 
 @register('end-of-history')
@@ -154,7 +157,7 @@ def end_of_history(event: E) ->None:
     """
     Move to the end of the input history, i.e., the line currently being entered.
     """
-    pass
+    event.current_buffer.history_forward(count=len(event.current_buffer._working_lines) - 1)
 
 
 @register('reverse-search-history')
@@ -163,15 +166,16 @@ def reverse_search_history(event: E) ->None:
     Search backward starting at the current line and moving `up` through
     the history as necessary. This is an incremental search.
     """
-    pass
+    event.app.layout.focus(event.app.layout.search_buffer)
+    event.app.vi_state.input_mode = EditingMode.INSERT
 
 
 @register('end-of-file')
-def end_of_file(event: E) ->None:
+def end-of-file(event: E) ->None:
     """
     Exit.
     """
-    pass
+    event.app.exit()
 
 
 @register('delete-char')
