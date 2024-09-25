@@ -81,7 +81,22 @@ def _split_multiline_prompt(get_prompt_text: _StyleAndTextTuplesCallable
     returns the fragments to be shown on the lines above the input; and another
     one with the fragments to be shown at the first line of the input.
     """
-    pass
+    def has_multiple_lines() -> bool:
+        return '\n' in fragment_list_to_text(get_prompt_text())
+
+    def before():
+        fragments = get_prompt_text()
+        if has_multiple_lines():
+            return fragments[:-1]
+        return []
+
+    def first_input_line():
+        fragments = get_prompt_text()
+        if has_multiple_lines():
+            return fragments[-1:]
+        return fragments
+
+    return has_multiple_lines, before, first_input_line
 
 
 class _RPrompt(Window):
@@ -306,32 +321,273 @@ class PromptSession(Generic[_T]):
         This returns something that can be used as either a `Filter`
         or `Filter`.
         """
-        pass
+        @Condition
+        def dynamic() -> bool:
+            value = getattr(self, attr_name)
+            return to_filter(value)()
+        return dynamic
 
     def _create_default_buffer(self) ->Buffer:
         """
         Create and return the default input buffer.
         """
-        pass
+        return Buffer(
+            name=DEFAULT_BUFFER,
+            complete_while_typing=self._dyncond('complete_while_typing'),
+            validate_while_typing=self._dyncond('validate_while_typing'),
+            enable_history_search=self._dyncond('enable_history_search'),
+            completer=DynamicCompleter(lambda: self.completer),
+            history=self.history,
+            validator=DynamicValidator(lambda: self.validator),
+            auto_suggest=DynamicAutoSuggest(lambda: self.auto_suggest),
+            accept_handler=self._accept_handler,
+            tempfile_suffix=lambda: to_str(self.tempfile_suffix or ''),
+            tempfile=lambda: to_str(self.tempfile or ''),
+        )
 
     def _create_layout(self) ->Layout:
         """
         Create `Layout` for this prompt.
         """
-        pass
+        # Create processors list.
+        processors = [
+            ConditionalProcessor(
+                AppendAutoSuggestion(), has_focus(DEFAULT_BUFFER) & ~is_done
+            ),
+            ConditionalProcessor(
+                HighlightIncrementalSearchProcessor(),
+                has_focus(SEARCH_BUFFER),
+            ),
+            PasswordProcessor(),
+            BeforeInput(lambda: self._get_prompt()),
+            AfterInput(lambda: self._get_rprompt()),
+        ]
+
+        if self.input_processors:
+            processors.extend(self.input_processors)
+
+        # Create bottom toolbars.
+        bottom_toolbar = ConditionalContainer(
+            Window(
+                FormattedTextControl(lambda: self.bottom_toolbar),
+                style="class:bottom-toolbar.text",
+            ),
+            filter=Condition(lambda: self.bottom_toolbar is not None),
+        )
+
+        search_toolbar = SearchToolbar(
+            search_buffer=self.search_buffer,
+            ignore_case=self._dyncond("search_ignore_case"),
+        )
+
+        search_buffer_control = SearchBufferControl(
+            buffer=self.search_buffer,
+            input_processors=[ReverseSearchProcessor()],
+            ignore_case=self._dyncond("search_ignore_case"),
+        )
+
+        system_toolbar = SystemToolbar(
+            enable_global_bindings=self._dyncond("enable_system_prompt")
+        )
+
+        def get_search_buffer_control():
+            "Return the UIControl to be focused when searching start."
+            if is_true(self._dyncond("multiline")):
+                return search_toolbar.control
+            else:
+                return search_buffer_control
+
+        default_buffer_control = BufferControl(
+            buffer=self.default_buffer,
+            search_buffer_control=get_search_buffer_control,
+            input_processors=processors,
+            include_default_input_processors=False,
+            lexer=DynamicLexer(lambda: self.lexer),
+            preview_search=True,
+        )
+
+        default_buffer_window = Window(
+            default_buffer_control,
+            height=self._dyncond("multiline"),
+            get_line_prefix=partial(
+                self._get_line_prefix, get_prompt_text_2=self._get_prompt_text_2
+            ),
+            wrap_lines=self._dyncond("wrap_lines"),
+        )
+
+        @Condition
+        def multi_column_complete_style():
+            return self.complete_style == CompleteStyle.MULTI_COLUMN
+
+        # Build the layout.
+        layout = HSplit(
+            [
+                # The main input, with completion menus floating on top of it.
+                FloatContainer(
+                    HSplit(
+                        [
+                            ConditionalContainer(
+                                Window(
+                                    FormattedTextControl(self._get_prompt_text_1),
+                                    dont_extend_height=True,
+                                ),
+                                Condition(lambda: self._get_prompt_text_1() != ""),
+                            ),
+                            ConditionalContainer(
+                                default_buffer_window,
+                                Condition(lambda: not is_true(self._dyncond("multiline"))),
+                            ),
+                            ConditionalContainer(
+                                HSplit(
+                                    [
+                                        default_buffer_window,
+                                        ValidationToolbar(),
+                                        system_toolbar,
+                                        search_toolbar,
+                                    ]
+                                ),
+                                Condition(lambda: is_true(self._dyncond("multiline"))),
+                            ),
+                        ]
+                    ),
+                    [
+                        Float(
+                            xcursor=True,
+                            ycursor=True,
+                            content=CompletionsMenu(
+                                max_height=16,
+                                scroll_offset=1,
+                                extra_filter=has_focus(DEFAULT_BUFFER)
+                                & ~multi_column_complete_style,
+                            ),
+                        ),
+                        Float(
+                            xcursor=True,
+                            ycursor=True,
+                            content=MultiColumnCompletionsMenu(
+                                show_meta=True,
+                                extra_filter=has_focus(DEFAULT_BUFFER)
+                                & multi_column_complete_style,
+                            ),
+                        ),
+                    ],
+                ),
+                ConditionalContainer(search_toolbar, ~is_true(self._dyncond("multiline"))),
+                bottom_toolbar,
+            ]
+        )
+
+        return Layout(layout, default_buffer_window)
 
     def _create_application(self, editing_mode: EditingMode,
         erase_when_done: bool) ->Application[_T]:
         """
         Create the `Application` object.
         """
-        pass
+        app = Application[_T](
+            layout=self.layout,
+            style=DynamicStyle(lambda: self.style),
+            include_default_pygments_style=self._dyncond(
+                "include_default_pygments_style"
+            ),
+            style_transformation=DynamicStyleTransformation(
+                lambda: self.style_transformation
+            ),
+            key_bindings=merge_key_bindings(
+                [
+                    ConditionalKeyBindings(
+                        self.key_bindings,
+                        self._dyncond("enable_system_prompt")
+                        | Condition(lambda: self.key_bindings is None),
+                    ),
+                    self._create_prompt_bindings(),
+                ]
+            ),
+            mouse_support=self._dyncond("mouse_support"),
+            editing_mode=editing_mode,
+            erase_when_done=erase_when_done,
+            reverse_vi_search_direction=True,
+            color_depth=self.color_depth,
+            cursor=DynamicCursorShapeConfig(lambda: self.cursor),
+            on_reset=self.on_reset,
+            on_render=self.on_render,
+            after_render=self.after_render,
+            input=self._input,
+            output=self._output,
+        )
+
+        # During render time, make sure that we focus the right buffer.
+        app.layout.focus_stack.push(DEFAULT_BUFFER)
+
+        return app
 
     def _create_prompt_bindings(self) ->KeyBindings:
         """
         Create the KeyBindings for a prompt application.
         """
-        pass
+        kb = KeyBindings()
+        handle = kb.add
+        default_focused = has_focus(DEFAULT_BUFFER)
+
+        @Condition
+        def do_accept() -> bool:
+            return not is_done() and self.app.layout.has_focus(DEFAULT_BUFFER)
+
+        @handle("enter", filter=do_accept & ~(vi_navigation_mode & default_focused))
+        def _(event: E) -> None:
+            "Accept input when enter has been pressed."
+            self._accept_handler(event.current_buffer)
+
+        @Condition
+        def readline_complete_style() -> bool:
+            return self.complete_style == CompleteStyle.READLINE_LIKE
+
+        # Readline-style tab completion.
+        @handle("tab", filter=readline_complete_style & default_focused)
+        def _(event: E) -> None:
+            "Display completions (like Readline)."
+            display_completions_like_readline(event)
+
+        @handle("c-c", filter=default_focused)
+        def _(event: E) -> None:
+            "Abort when Control-C has been pressed."
+            event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
+        @Condition
+        def ctrl_d_condition() -> bool:
+            """ Ctrl-D binding is only active when the default buffer is selected
+            and empty. """
+            app = get_app()
+            return (
+                app.current_buffer.name == DEFAULT_BUFFER
+                and not app.current_buffer.text
+            )
+
+        @handle("c-d", filter=ctrl_d_condition & default_focused)
+        def _(event: E) -> None:
+            "Exit when Control-D has been pressed."
+            event.app.exit(exception=EOFError, style="class:exiting")
+
+        suspend_supported = Condition(suspend_to_background_supported)
+
+        @Condition
+        def enable_open_in_editor() -> bool:
+            return bool(self.enable_open_in_editor)
+
+        @handle("c-x", "c-e", filter=~vi_mode & enable_open_in_editor & default_focused)
+        @handle("v", filter=vi_mode & enable_open_in_editor & default_focused)
+        def _(event: E) -> None:
+            "Open editor."
+            event.app.current_buffer.open_in_editor(event.app)
+
+        @handle("c-z", filter=suspend_supported)
+        def _(event: E) -> None:
+            """
+            Suspend process to background.
+            """
+            event.app.suspend_to_background()
+
+        return merge_key_bindings([kb, load_auto_suggest_bindings()])
 
     def prompt(self, message: (AnyFormattedText | None)=None, *,
         editing_mode: (EditingMode | None)=None, refresh_interval: (float |
