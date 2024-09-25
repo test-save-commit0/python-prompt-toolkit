@@ -31,7 +31,12 @@ class GrammarCompleter(Completer):
         (The completer assumes that the cursor position was at the end of the
         input string.)
         """
-        pass
+        for var_name, value in match.variables():
+            if var_name in self.completers:
+                completer = self.completers[var_name]
+                # Create a new document for the completer
+                document = Document(value, cursor_position=len(value))
+                yield from completer.get_completions(document, complete_event)
 
     def _remove_duplicates(self, items: Iterable[Completion]) ->list[Completion
         ]:
@@ -40,4 +45,10 @@ class GrammarCompleter(Completer):
         (Sometimes we have duplicates, because the there several matches of the
         same grammar, each yielding similar completions.)
         """
-        pass
+        seen = set()
+        result = []
+        for item in items:
+            if item.text not in seen:
+                seen.add(item.text)
+                result.append(item)
+        return result
