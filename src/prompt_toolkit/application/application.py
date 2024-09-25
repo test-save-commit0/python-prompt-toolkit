@@ -223,7 +223,16 @@ class Application(Generic[_AppResult]):
         Create a `Style` object that merges the default UI style, the default
         pygments style, and the custom user style.
         """
-        pass
+        styles = []
+        styles.append(default_ui_style())
+
+        if include_default_pygments_style():
+            styles.append(default_pygments_style())
+
+        if self.style:
+            styles.append(self.style)
+
+        return merge_styles(styles)
 
     @property
     def color_depth(self) ->ColorDepth:
@@ -239,7 +248,12 @@ class Application(Generic[_AppResult]):
           created using `output.defaults.create_output`, then this value is
           coming from the $PROMPT_TOOLKIT_COLOR_DEPTH environment variable.
         """
-        pass
+        if callable(self._color_depth):
+            value = self._color_depth()
+            if value is not None:
+                return value
+
+        return self.output.get_default_color_depth()
 
     @property
     def current_buffer(self) ->Buffer:
@@ -250,7 +264,7 @@ class Application(Generic[_AppResult]):
         has the focus. In this case, it's really not practical to check for
         `None` values or catch exceptions every time.)
         """
-        pass
+        return self.layout.current_control.buffer or Buffer()
 
     @property
     def current_search_state(self) ->SearchState:
@@ -258,19 +272,42 @@ class Application(Generic[_AppResult]):
         Return the current :class:`.SearchState`. (The one for the focused
         :class:`.BufferControl`.)
         """
-        pass
+        control = self.layout.current_control
+        if isinstance(control, BufferControl):
+            return control.search_state
+        return SearchState()
 
     def reset(self) ->None:
         """
         Reset everything, for reading the next input.
         """
-        pass
+        self.layout.reset()
+        self.vi_state.reset()
+        self.emacs_state.reset()
+
+        self.renderer.reset()
+
+        self.exit_style = ''
+
+        self.background_tasks = []
+
+        self.on_reset.fire()
 
     def invalidate(self) ->None:
         """
         Thread safe way of sending a repaint trigger to the input event loop.
         """
-        pass
+        if self.loop is None:
+            return
+
+        if not self._invalidated:
+            self._invalidated = True
+
+            def redraw() ->None:
+                self._invalidated = False
+                self._redraw()
+
+            call_soon_threadsafe(redraw, loop=self.loop)
 
     @property
     def invalidated(self) ->bool:
