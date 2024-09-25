@@ -84,38 +84,54 @@ class TelnetConnection:
         """
         Run application.
         """
-        pass
+        await self._ready.wait()
+        self.context = contextvars.copy_context()
+        with create_app_session(input=self.vt100_input, output=self.vt100_output):
+            await self.interact(self)
 
     def feed(self, data: bytes) ->None:
         """
         Handler for incoming data. (Called by TelnetServer.)
         """
-        pass
+        self.parser.feed(data)
 
     def close(self) ->None:
         """
         Closed by client.
         """
-        pass
+        if not self._closed:
+            self._closed = True
+            self.vt100_input.close()
+            self.conn.close()
+            self.server.connections.remove(self)
 
     def send(self, formatted_text: AnyFormattedText) ->None:
         """
         Send text to the client.
         """
-        pass
+        formatted_text = to_formatted_text(formatted_text)
+        print_formatted_text(self.vt100_output, formatted_text, self.style or DummyStyle())
 
     def send_above_prompt(self, formatted_text: AnyFormattedText) ->None:
         """
         Send text to the client.
         This is asynchronous, returns a `Future`.
         """
-        pass
+        async def send_above_prompt() ->None:
+            if self.context:
+                with create_app_session(input=self.vt100_input, output=self.vt100_output):
+                    self.context.run(lambda: run_in_terminal(lambda: self.send(formatted_text)))
+
+        asyncio.create_task(send_above_prompt())
 
     def erase_screen(self) ->None:
         """
         Erase the screen and move the cursor to the top.
         """
-        pass
+        if self.vt100_output:
+            self.vt100_output.erase_screen()
+            self.vt100_output.cursor_goto(0, 0)
+            self.vt100_output.flush()
 
 
 class TelnetServer:
@@ -157,7 +173,21 @@ class TelnetServer:
         :param ready_cb: Callback that will be called at the point that we're
             actually listening.
         """
-        pass
+        loop = get_running_loop()
+        server = await loop.create_server(
+            lambda: asyncio.Protocol(),  # Placeholder protocol
+            self.host, self.port, reuse_address=True)
+
+        logger.info(f"Listening for telnet connections on {self.host}:{self.port}")
+
+        if ready_cb:
+            ready_cb()
+
+        async with server:
+            while True:
+                conn, addr = await server.accept()
+                logger.info(f"New connection from {addr}")
+                self._accept(conn)
 
     def start(self) ->None:
         """
@@ -165,7 +195,8 @@ class TelnetServer:
 
         Start the telnet server (stop by calling and awaiting `stop()`).
         """
-        pass
+        if self._run_task is None:
+            self._run_task = asyncio.create_task(self.run())
 
     async def stop(self) ->None:
         """
@@ -174,10 +205,37 @@ class TelnetServer:
         Stop a telnet server that was started using `.start()` and wait for the
         cancellation to complete.
         """
-        pass
+        if self._run_task:
+            self._run_task.cancel()
+            await asyncio.gather(self._run_task, return_exceptions=True)
+            self._run_task = None
 
-    def _accept(self, listen_socket: socket.socket) ->None:
+        for task in self._application_tasks:
+            task.cancel()
+
+        await asyncio.gather(*self._application_tasks, return_exceptions=True)
+        self._application_tasks.clear()
+
+        for connection in list(self.connections):
+            connection.close()
+
+    def _accept(self, conn: socket.socket) ->None:
         """
         Accept new incoming connection.
         """
-        pass
+        addr = conn.getpeername()
+        vt100_input = create_pipe_input()
+
+        connection = TelnetConnection(
+            conn=conn,
+            addr=addr,
+            interact=self.interact,
+            server=self,
+            encoding=self.encoding,
+            style=self.style,
+            vt100_input=vt100_input,
+            enable_cpr=self.enable_cpr,
+        )
+
+        self.connections.add(connection)
+        self._application_tasks.append(asyncio.create_task(connection.run_application()))
