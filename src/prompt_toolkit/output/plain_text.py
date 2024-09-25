@@ -27,5 +27,11 @@ class PlainTextOutput(Output):
         self._buffer: list[str] = []
 
     def fileno(self) ->int:
-        """There is no sensible default for fileno()."""
-        pass
+        """
+        Return the file descriptor of the stdout stream.
+        
+        If stdout doesn't have a file descriptor, raise an AttributeError.
+        """
+        if hasattr(self.stdout, 'fileno'):
+            return self.stdout.fileno()
+        raise AttributeError("The stdout stream does not have a file descriptor.")
