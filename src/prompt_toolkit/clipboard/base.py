@@ -42,13 +42,14 @@ class Clipboard(metaclass=ABCMeta):
         """
         Shortcut for setting plain text on clipboard.
         """
-        pass
+        self.set_data(ClipboardData(text))
 
     def rotate(self) ->None:
         """
         For Emacs mode, rotate the kill ring.
         """
-        pass
+        # This is a base implementation, which doesn't do anything.
+        # Subclasses can override this method if they support rotation.
 
     @abstractmethod
     def get_data(self) ->ClipboardData:
@@ -62,6 +63,19 @@ class DummyClipboard(Clipboard):
     """
     Clipboard implementation that doesn't remember anything.
     """
+    def set_data(self, data: ClipboardData) ->None:
+        """
+        Set data to the clipboard.
+
+        :param data: :class:`~.ClipboardData` instance.
+        """
+        pass  # Dummy implementation, doesn't store anything
+
+    def get_data(self) ->ClipboardData:
+        """
+        Return clipboard data.
+        """
+        return ClipboardData()  # Always return empty clipboard data
 
 
 class DynamicClipboard(Clipboard):
@@ -73,3 +87,38 @@ class DynamicClipboard(Clipboard):
 
     def __init__(self, get_clipboard: Callable[[], Clipboard | None]) ->None:
         self.get_clipboard = get_clipboard
+
+    def set_data(self, data: ClipboardData) ->None:
+        """
+        Set data to the clipboard.
+
+        :param data: :class:`~.ClipboardData` instance.
+        """
+        clipboard = self.get_clipboard()
+        if clipboard:
+            clipboard.set_data(data)
+
+    def get_data(self) ->ClipboardData:
+        """
+        Return clipboard data.
+        """
+        clipboard = self.get_clipboard()
+        if clipboard:
+            return clipboard.get_data()
+        return ClipboardData()  # Return empty clipboard data if no clipboard is available
+
+    def set_text(self, text: str) ->None:
+        """
+        Shortcut for setting plain text on clipboard.
+        """
+        clipboard = self.get_clipboard()
+        if clipboard:
+            clipboard.set_text(text)
+
+    def rotate(self) ->None:
+        """
+        For Emacs mode, rotate the kill ring.
+        """
+        clipboard = self.get_clipboard()
+        if clipboard:
+            clipboard.rotate()
