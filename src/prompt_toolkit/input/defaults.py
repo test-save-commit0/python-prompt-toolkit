@@ -17,7 +17,19 @@ def create_input(stdin: (TextIO | None)=None, always_prefer_tty: bool=False
         `sys.stdin`. (We can open `stdout` or `stderr` for reading, this is how
         a `$PAGER` works.)
     """
-    pass
+    if stdin is None:
+        stdin = sys.stdin
+
+    if sys.platform == 'win32':
+        from prompt_toolkit.input.win32 import Win32Input
+        return Win32Input(stdin)
+    else:
+        from prompt_toolkit.input.vt100 import Vt100Input
+        if always_prefer_tty and not stdin.isatty():
+            for file in (sys.stderr, sys.stdout):
+                if file.isatty():
+                    return Vt100Input(open(file.fileno(), 'rb', buffering=0))
+        return Vt100Input(stdin)
 
 
 def create_pipe_input() ->ContextManager[PipeInput]:
@@ -33,4 +45,12 @@ def create_pipe_input() ->ContextManager[PipeInput]:
     Breaking change: In prompt_toolkit 3.0.28 and earlier, this was returning
     the `PipeInput` directly, rather than through a context manager.
     """
-    pass
+    return _PipeInputContextManager()
+
+class _PipeInputContextManager:
+    def __enter__(self) -> PipeInput:
+        self.pipe_input = PipeInput()
+        return self.pipe_input
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.pipe_input.close()
