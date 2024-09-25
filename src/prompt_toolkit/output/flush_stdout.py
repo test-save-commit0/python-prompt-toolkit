@@ -1,5 +1,6 @@
 from __future__ import annotations
 import errno
+import fcntl
 import os
 import sys
 from contextlib import contextmanager
@@ -12,4 +13,13 @@ def _blocking_io(io: IO[str]) ->Iterator[None]:
     """
     Ensure that the FD for `io` is set to blocking in here.
     """
-    pass
+    fd = io.fileno()
+    old_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    
+    try:
+        # Remove non-blocking flag
+        fcntl.fcntl(fd, fcntl.F_SETFL, old_flags & ~os.O_NONBLOCK)
+        yield
+    finally:
+        # Restore original flags
+        fcntl.fcntl(fd, fcntl.F_SETFL, old_flags)
