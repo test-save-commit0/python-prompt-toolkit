@@ -73,7 +73,39 @@ def print_formatted_text(*values: Any, sep: str=' ', end: str='\n', file: (
     :param include_default_pygments_style: `bool`. Include the default Pygments
         style when set to `True` (the default).
     """
-    pass
+    # Create a merged style
+    merged_style = _create_merged_style(style, include_default_pygments_style)
+
+    # Convert all values to formatted text
+    fragments = []
+    for i, value in enumerate(values):
+        fragments.extend(to_formatted_text(value))
+        if i < len(values) - 1:
+            fragments.append(('', sep))
+
+    fragments.append(('', end))
+
+    # Get output object
+    if output is None:
+        if file is None:
+            file = get_app_session().output
+        output = create_output(stdout=file)
+
+    # Get color depth
+    if color_depth is None:
+        color_depth = ColorDepth.default()
+
+    # Create and print formatted text
+    formatted_text = FormattedText(fragments)
+    renderer_print_formatted_text(
+        output, formatted_text, merged_style,
+        color_depth=color_depth,
+        style_transformation=style_transformation,
+    )
+
+    # Flush the output
+    if flush:
+        output.flush()
 
 
 def print_container(container: AnyContainer, file: (TextIO | None)=None,
@@ -88,7 +120,17 @@ def print_container(container: AnyContainer, file: (TextIO | None)=None,
         print_container(
             Frame(TextArea(text='Hello world!')))
     """
-    pass
+    output = create_output(stdout=file)
+    merged_style = _create_merged_style(style, include_default_pygments_style)
+
+    app = Application(
+        layout=Layout(container=container),
+        output=output,
+        style=merged_style,
+    )
+
+    with app.output.capture_stdout():
+        app.run(in_thread=True)
 
 
 def _create_merged_style(style: (BaseStyle | None),
@@ -96,25 +138,34 @@ def _create_merged_style(style: (BaseStyle | None),
     """
     Merge user defined style with built-in style.
     """
-    pass
+    styles = [default_ui_style()]
+    if include_default_pygments_style:
+        styles.append(default_pygments_style())
+    if style:
+        styles.append(style)
+    return merge_styles(styles)
 
 
 def clear() ->None:
     """
     Clear the screen.
     """
-    pass
+    output = get_app_session().output
+    output.erase_screen()
+    output.cursor_goto(0, 0)
+    output.flush()
 
 
 def set_title(text: str) ->None:
     """
     Set the terminal title.
     """
-    pass
+    output = get_app_session().output
+    output.set_title(text)
 
 
 def clear_title() ->None:
     """
     Erase the current title.
     """
-    pass
+    set_title('')
