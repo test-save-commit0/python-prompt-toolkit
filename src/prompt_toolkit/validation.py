@@ -80,7 +80,7 @@ class Validator(metaclass=ABCMeta):
         :param move_cursor_to_end: Move the cursor to the end of the input, if
             the input is invalid.
         """
-        pass
+        return _ValidatorFromCallable(validate_func, error_message, move_cursor_to_end)
 
 
 class _ValidatorFromCallable(Validator):
@@ -97,6 +97,14 @@ class _ValidatorFromCallable(Validator):
     def __repr__(self) ->str:
         return f'Validator.from_callable({self.func!r})'
 
+    def validate(self, document: Document) ->None:
+        if not self.func(document.text):
+            if self.move_cursor_to_end:
+                cursor_position = len(document.text)
+            else:
+                cursor_position = 0
+            raise ValidationError(cursor_position=cursor_position, message=self.error_message)
+
 
 class ThreadedValidator(Validator):
     """
@@ -112,13 +120,15 @@ class ThreadedValidator(Validator):
         """
         Run the `validate` function in a thread.
         """
-        pass
+        await run_in_executor_with_context(lambda: self.validator.validate(document))
 
 
 class DummyValidator(Validator):
     """
     Validator class that accepts any input.
     """
+    def validate(self, document: Document) ->None:
+        pass  # Always valid
 
 
 class ConditionalValidator(Validator):
@@ -131,6 +141,10 @@ class ConditionalValidator(Validator):
         self.validator = validator
         self.filter = to_filter(filter)
 
+    def validate(self, document: Document) ->None:
+        if self.filter():
+            self.validator.validate(document)
+
 
 class DynamicValidator(Validator):
     """
@@ -141,3 +155,8 @@ class DynamicValidator(Validator):
 
     def __init__(self, get_validator: Callable[[], Validator | None]) ->None:
         self.get_validator = get_validator
+
+    def validate(self, document: Document) ->None:
+        validator = self.get_validator()
+        if validator is not None:
+            validator.validate(document)
