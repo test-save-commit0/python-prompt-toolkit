@@ -18,11 +18,63 @@ def load_emacs_bindings() ->KeyBindingsBase:
     """
     Some e-macs extensions.
     """
-    pass
+    kb = KeyBindings()
+
+    @kb.add('c-x', 'c-e')
+    def _(event: E) -> None:
+        """Open editor."""
+        event.app.run_system_command('editor')
+
+    @kb.add('c-x', 'c-f')
+    def _(event: E) -> None:
+        """Find file."""
+        event.app.run_system_command('find_file')
+
+    @kb.add('c-x', 'c-s')
+    def _(event: E) -> None:
+        """Save file."""
+        event.app.run_system_command('save_file')
+
+    @kb.add('c-x', 'c-c')
+    def _(event: E) -> None:
+        """Quit."""
+        event.app.exit()
+
+    return ConditionalKeyBindings(kb, emacs_mode)
 
 
 def load_emacs_shift_selection_bindings() ->KeyBindingsBase:
     """
     Bindings to select text with shift + cursor movements
     """
-    pass
+    kb = KeyBindings()
+
+    @kb.add('s-left')
+    def _(event: E) -> None:
+        """Move cursor left and select."""
+        buff = event.current_buffer
+        buff.cursor_position += buff.document.get_cursor_left_position(count=event.arg)
+        buff.start_selection()
+
+    @kb.add('s-right')
+    def _(event: E) -> None:
+        """Move cursor right and select."""
+        buff = event.current_buffer
+        buff.cursor_position += buff.document.get_cursor_right_position(count=event.arg)
+        buff.start_selection()
+
+    @kb.add('s-up')
+    def _(event: E) -> None:
+        """Move cursor up and select."""
+        buff = event.current_buffer
+        buff.cursor_up(count=event.arg)
+        buff.start_selection()
+
+    @kb.add('s-down')
+    def _(event: E) -> None:
+        """Move cursor down and select."""
+        buff = event.current_buffer
+        buff.cursor_down(count=event.arg)
+        buff.start_selection()
+
+    return ConditionalKeyBindings(kb, emacs_mode & shift_selection_mode)
