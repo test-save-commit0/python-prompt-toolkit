@@ -47,7 +47,56 @@ def _output_screen_diff(app: Application[Any], output: Output, screen:
     :param width: The width of the terminal.
     :param previous_width: The width of the terminal during the last rendering.
     """
-    pass
+    width = size.columns
+
+    # Create locals for faster access
+    write = output.write
+    write_position = output.set_cursor_position
+    move_cursor = output.move_cursor
+
+    # Skip first empty lines. (This is a performance optimization.)
+    if previous_screen is None:
+        row = 0
+    else:
+        row = 0
+        while row < screen.height and row < previous_screen.height and screen.data_buffer[row] == previous_screen.data_buffer[row]:
+            row += 1
+
+    # Render output
+    for y in range(row, screen.height):
+        row = screen.data_buffer[y]
+        previous_row = previous_screen.data_buffer[y] if previous_screen and y < previous_screen.height else None
+
+        col = 0
+        while col < width:
+            char = row[col]
+            char_width = char.width or 1
+
+            if previous_row:
+                previous_char = previous_row[col]
+                if char == previous_char:
+                    col += char_width
+                    continue
+
+            current_pos = Point(x=col, y=y)
+            write_position(current_pos.x, current_pos.y)
+            style = char.style
+
+            if style != last_style:
+                attrs = attrs_for_style_string[style]
+                output.set_attributes(attrs, color_depth)
+                last_style = style
+
+            write(char.char)
+            col += char_width
+
+    # Move cursor
+    if is_done:
+        write_position(screen.cursor_position.x, screen.cursor_position.y)
+    else:
+        move_cursor(screen.cursor_position.x - current_pos.x, screen.cursor_position.y - current_pos.y)
+
+    return screen.cursor_position, last_style
 
 
 class HeightIsUnknownError(Exception):
@@ -142,7 +191,7 @@ class Renderer:
         The `Screen` class that was generated during the last rendering.
         This can be `None`.
         """
-        pass
+        return getattr(self, '_last_rendered_screen', None)
 
     @property
     def height_is_known(self) ->bool:
@@ -151,14 +200,17 @@ class Renderer:
         is known. (It's often nicer to draw bottom toolbars only if the height
         is known, in order to avoid flickering when the CPR response arrives.)
         """
-        pass
+        return self.cpr_support != CPR_Support.UNKNOWN and not self.waiting_for_cpr
 
     @property
     def rows_above_layout(self) ->int:
         """
         Return the number of rows visible in the terminal above the layout.
         """
-        pass
+        if self.cpr_support == CPR_Support.SUPPORTED:
+            return self._rows_above_layout
+        else:
+            return 0
 
     def request_absolute_cursor_position(self) ->None:
         """
@@ -171,14 +223,26 @@ class Renderer:
         For vt100: Do CPR request. (answer will arrive later.)
         For win32: Do API call. (Answer comes immediately.)
         """
-        pass
+        if self.cpr_support != CPR_Support.NOT_SUPPORTED:
+            self.output.get_cursor_position()
+            self.cpr_support = CPR_Support.SUPPORTED
+
+        if self.cpr_support == CPR_Support.NOT_SUPPORTED:
+            if self.cpr_not_supported_callback:
+                self.cpr_not_supported_callback()
 
     def report_absolute_cursor_row(self, row: int) ->None:
         """
         To be called when we know the absolute cursor position.
         (As an answer of a "Cursor Position Request" response.)
         """
-        pass
+        self._rows_above_layout = row - 1
+
+        # Resolve future.
+        if self._waiting_for_cpr_futures:
+            for f in self._waiting_for_cpr_futures:
+                f.set_result(None)
+            self._waiting_for_cpr_futures = deque()
 
     @property
     def waiting_for_cpr(self) ->bool:
@@ -186,13 +250,14 @@ class Renderer:
         Waiting for CPR flag. True when we send the request, but didn't got a
         response.
         """
-        pass
+        return bool(self._waiting_for_cpr_futures)
 
     async def wait_for_cpr_responses(self, timeout: int=1) ->None:
         """
         Wait for a CPR response.
         """
-        pass
+        if self._waiting_for_cpr_futures:
+            await wait(list(self._waiting_for_cpr_futures), timeout=timeout)
 
     def render(self, app: Application[Any], layout: Layout, is_done: bool=False
         ) ->None:
@@ -202,7 +267,79 @@ class Renderer:
         :param is_done: When True, put the cursor at the end of the interface. We
                 won't print any changes to this part.
         """
-        pass
+        output = self.output
+        screen = layout.screen
+
+        if is_done:
+            self.request_absolute_cursor_position()
+
+        # Enter alternate screen.
+        if self.full_screen and not self._in_alternate_screen:
+            self._in_alternate_screen = True
+            output.enter_alternate_screen()
+
+        # Enable/disable mouse support.
+        needs_mouse_support = self.mouse_support()
+        if needs_mouse_support != self._mouse_support_enabled:
+            if needs_mouse_support:
+                output.enable_mouse_support()
+            else:
+                output.disable_mouse_support()
+            self._mouse_support_enabled = needs_mouse_support
+
+        # Enable bracketed paste.
+        if not self._bracketed_paste_enabled:
+            output.enable_bracketed_paste()
+            self._bracketed_paste_enabled = True
+
+        # Reset cursor key mode.
+        if not self._cursor_key_mode_reset:
+            output.reset_cursor_key_mode()
+            self._cursor_key_mode_reset = True
+
+        # Create new style transformation.
+        style_transformation = app.style_transformation or DummyStyleTransformation()
+
+        # Create new Cache objects.
+        style_hash = hash((app.style, style_transformation))
+        color_depth = output.get_default_color_depth()
+
+        if (style_hash != self._last_style_hash or
+            color_depth != self._last_color_depth):
+            self._attrs_for_style = _StyleStringToAttrsCache(
+                get_attrs_for_style_str=lambda style_str: app.style.get_attrs_for_style_str(style_str),
+                style_transformation=style_transformation)
+            self._style_string_has_style = _StyleStringHasStyleCache(self._attrs_for_style)
+
+        self._last_style_hash = style_hash
+        self._last_color_depth = color_depth
+
+        # Render to screen.
+        size = output.get_size()
+        if self.full_screen:
+            screen.resize(size)
+        else:
+            screen.resize(Size(rows=size.rows, columns=size.columns))
+
+        # Calculate the difference between this and the previous screen.
+        current_pos, last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            current_pos=Point(0, 0),
+            color_depth=color_depth,
+            previous_screen=self._last_rendered_screen,
+            last_style=None,
+            is_done=is_done,
+            full_screen=self.full_screen,
+            attrs_for_style_string=self._attrs_for_style,
+            style_string_has_style=self._style_string_has_style,
+            size=size,
+            previous_width=(self._last_rendered_screen.width
+                            if self._last_rendered_screen else 0))
+
+        output.flush()
+        self._last_rendered_screen = screen
 
     def erase(self, leave_alternate_screen: bool=True) ->None:
         """
@@ -213,13 +350,30 @@ class Renderer:
         :param leave_alternate_screen: When True, and when inside an alternate
             screen buffer, quit the alternate screen.
         """
-        pass
+        output = self.output
+
+        output.erase_screen()
+        output.reset_attributes()
+        output.disable_mouse_support()
+        output.disable_bracketed_paste()
+        output.reset_cursor_key_mode()
+
+        if leave_alternate_screen and self._in_alternate_screen:
+            output.quit_alternate_screen()
+            self._in_alternate_screen = False
+
+        self._last_rendered_screen = None
+        output.flush()
 
     def clear(self) ->None:
         """
         Clear screen and go to 0,0
         """
-        pass
+        output = self.output
+
+        output.erase_screen()
+        output.cursor_goto(0, 0)
+        output.flush()
 
 
 def print_formatted_text(output: Output, formatted_text: AnyFormattedText,
