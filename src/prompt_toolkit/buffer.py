@@ -226,7 +226,15 @@ class Buffer:
         """
         :param append_to_history: Append current input to history first.
         """
-        pass
+        if append_to_history:
+            self.append_to_history()
+
+        if document is None:
+            document = Document()
+
+        self.document = document
+        self._undo_stack = []
+        self._redo_stack = []
 
     def load_history_if_not_yet_loaded(self) ->None:
         """
@@ -249,15 +257,22 @@ class Buffer:
             thread, but history loading is the only place where it matters, and
             this solves it.
         """
-        pass
+        if self._load_history_task is None:
+            async def load_history():
+                await self.history.load()
+            self._load_history_task = asyncio.create_task(load_history())
 
     def _set_text(self, value: str) ->bool:
         """set text at current working_index. Return whether it changed."""
-        pass
+        original_value = self.text
+        self.text = value
+        return original_value != value
 
     def _set_cursor_position(self, value: int) ->bool:
         """Set cursor position. Return whether it changed."""
-        pass
+        original_position = self.cursor_position
+        self.cursor_position = max(0, min(value, len(self.text)))
+        return original_position != self.cursor_position
 
     @text.setter
     def text(self, value: str) ->None:
@@ -266,14 +281,17 @@ class Buffer:
         valid for this text. text/cursor_position should be consistent at any time,
         otherwise set a Document instead.)
         """
-        pass
+        if self._set_text(value):
+            self.cursor_position = min(self.cursor_position, len(value))
+            self.on_text_changed.fire()
 
     @cursor_position.setter
     def cursor_position(self, value: int) ->None:
         """
         Setting cursor position.
         """
-        pass
+        if self._set_cursor_position(value):
+            self.on_cursor_position_changed.fire()
 
     @property
     def document(self) ->Document:
@@ -281,7 +299,10 @@ class Buffer:
         Return :class:`~prompt_toolkit.document.Document` instance from the
         current text, cursor position and selection state.
         """
-        pass
+        return self._document_cache.get(
+            (self.text, self.cursor_position, self.selection_state),
+            lambda: Document(self.text, self.cursor_position, self.selection_state)
+        )
 
     @document.setter
     def document(self, value: Document) ->None:
@@ -291,7 +312,7 @@ class Buffer:
         This will set both the text and cursor position at the same time, but
         atomically. (Change events will be triggered only after both have been set.)
         """
-        pass
+        self.set_document(value)
 
     def set_document(self, value: Document, bypass_readonly: bool=False
         ) ->None:
@@ -312,21 +333,32 @@ class Buffer:
             you expect, and there won't be a stack trace. Use try/finally
             around this function if you need some cleanup code.
         """
-        pass
+        if not bypass_readonly and self.read_only():
+            raise EditReadOnlyBuffer()
+
+        text_changed = self._set_text(value.text)
+        cursor_position_changed = self._set_cursor_position(value.cursor_position)
+
+        if text_changed:
+            self.on_text_changed.fire()
+        if cursor_position_changed:
+            self.on_cursor_position_changed.fire()
 
     @property
     def is_returnable(self) ->bool:
         """
         True when there is something handling accept.
         """
-        pass
+        return self.accept_handler is not None
 
     def save_to_undo_stack(self, clear_redo_stack: bool=True) ->None:
         """
         Safe current state (input text and cursor position), so that we can
         restore it by calling undo.
         """
-        pass
+        self._undo_stack.append((self.text, self.cursor_position))
+        if clear_redo_stack:
+            self._redo_stack = []
 
     def transform_lines(self, line_index_iterator: Iterable[int],
         transform_callback: Callable[[str], str]) ->str:
@@ -345,7 +377,16 @@ class Buffer:
 
         :returns: The new text.
         """
-        pass
+        lines = self.text.splitlines(True)
+        new_lines = []
+
+        for index, original_line in enumerate(lines):
+            if index in line_index_iterator:
+                new_lines.append(transform_callback(original_line))
+            else:
+                new_lines.append(original_line)
+
+        return ''.join(new_lines)
 
     def transform_current_line(self, transform_callback: Callable[[str], str]
         ) ->None:
