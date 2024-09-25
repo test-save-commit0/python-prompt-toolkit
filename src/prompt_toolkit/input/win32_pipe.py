@@ -44,12 +44,12 @@ class Win32PipeInput(_Win32InputBase, PipeInput):
         """
         The windows pipe doesn't depend on the file handle.
         """
-        pass
+        return -1  # Return a dummy value since it's not used
 
     @property
     def handle(self) ->HANDLE:
         """The handle used for registering this pipe in the event loop."""
-        pass
+        return self._event
 
     def attach(self, input_ready_callback: Callable[[], None]
         ) ->ContextManager[None]:
@@ -57,40 +57,45 @@ class Win32PipeInput(_Win32InputBase, PipeInput):
         Return a context manager that makes this input active in the current
         event loop.
         """
-        pass
+        return attach_win32_input(self, input_ready_callback)
 
     def detach(self) ->ContextManager[None]:
         """
         Return a context manager that makes sure that this input is not active
         in the current event loop.
         """
-        pass
+        return detach_win32_input(self)
 
     def read_keys(self) ->list[KeyPress]:
         """Read list of KeyPress."""
-        pass
+        result = self._buffer
+        self._buffer = []
+        return result
 
     def flush_keys(self) ->list[KeyPress]:
         """
         Flush pending keys and return them.
         (Used for flushing the 'escape' key.)
         """
-        pass
+        return self.read_keys()
 
     def send_bytes(self, data: bytes) ->None:
         """Send bytes to the input."""
-        pass
+        self.vt100_parser.feed(data)
+        windll.kernel32.SetEvent(self._event)
 
     def send_text(self, text: str) ->None:
         """Send text to the input."""
-        pass
+        self.send_bytes(text.encode())
 
     def close(self) ->None:
         """Close write-end of the pipe."""
-        pass
+        if not self._closed:
+            self._closed = True
+            windll.kernel32.CloseHandle(self._event)
 
     def typeahead_hash(self) ->str:
         """
         This needs to be unique for every `PipeInput`.
         """
-        pass
+        return f'win32-pipe-input-{self._id}'
