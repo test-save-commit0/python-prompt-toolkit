@@ -53,25 +53,31 @@ class Vt100Input(Input):
         Return a context manager that makes this input active in the current
         event loop.
         """
-        pass
+        return _attached_input(self, input_ready_callback)
 
     def detach(self) ->ContextManager[None]:
         """
         Return a context manager that makes sure that this input is not active
         in the current event loop.
         """
-        pass
+        return _attached_input(self, None)
 
     def read_keys(self) ->list[KeyPress]:
         """Read list of KeyPress."""
-        pass
+        data = self.stdin_reader.read()
+        self.vt100_parser.feed(data)
+        result = self._buffer
+        self._buffer = []
+        return result
 
     def flush_keys(self) ->list[KeyPress]:
         """
         Flush pending keys and return them.
         (Used for flushing the 'escape' key.)
         """
-        pass
+        result = self._buffer
+        self._buffer = []
+        return result
 
 
 _current_callbacks: dict[tuple[AbstractEventLoop, int], Callable[[], None] |
@@ -79,7 +85,7 @@ _current_callbacks: dict[tuple[AbstractEventLoop, int], Callable[[], None] |
 
 
 @contextlib.contextmanager
-def _attached_input(input: Vt100Input, callback: Callable[[], None]
+def _attached_input(input: Vt100Input, callback: Callable[[], None] | None
     ) ->Generator[None, None, None]:
     """
     Context manager that makes this input active in the current event loop.
@@ -87,7 +93,30 @@ def _attached_input(input: Vt100Input, callback: Callable[[], None]
     :param input: :class:`~prompt_toolkit.input.Input` object.
     :param callback: Called when the input is ready to read.
     """
-    pass
+    loop = get_running_loop()
+    key = (loop, input._fileno)
+
+    if callback is None:
+        # Detach
+        previous = _current_callbacks.get(key)
+        if previous:
+            loop.remove_reader(input._fileno)
+            del _current_callbacks[key]
+    else:
+        # Attach
+        def ready() -> None:
+            callback()
+
+        _current_callbacks[key] = ready
+        loop.add_reader(input._fileno, ready)
+
+    try:
+        yield
+    finally:
+        if callback is not None:
+            loop.remove_reader(input._fileno)
+            if key in _current_callbacks:
+                del _current_callbacks[key]
 
 
 class raw_mode:
