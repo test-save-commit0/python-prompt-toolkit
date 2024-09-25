@@ -119,7 +119,8 @@ class HighlightSearchProcessor(Processor):
         """
         The text we are searching for.
         """
-        pass
+        search_state = buffer_control.search_state
+        return search_state.text if search_state else ''
 
 
 class HighlightIncrementalSearchProcessor(HighlightSearchProcessor):
@@ -138,7 +139,8 @@ class HighlightIncrementalSearchProcessor(HighlightSearchProcessor):
         """
         The text we are searching for.
         """
-        pass
+        search_state = buffer_control.search_state
+        return search_state.text if search_state and search_state.isearch_state else ''
 
 
 class HighlightSelectionProcessor(Processor):
@@ -183,7 +185,44 @@ class HighlightMatchingBracketProcessor(Processor):
         """
         Return a list of (row, col) tuples that need to be highlighted.
         """
-        pass
+        cursor_row, cursor_col = document.translate_index_to_position(
+            document.cursor_position)
+        
+        def find_matching_bracket(pos, direction):
+            stack = []
+            for i in range(pos, 0 if direction < 0 else len(document.text), direction):
+                char = document.text[i]
+                if char in self.chars:
+                    if not stack and char in self._closing_braces:
+                        return i
+                    if self.chars.index(char) % 2 == 0:
+                        stack.append(char)
+                    else:
+                        if stack and self.chars.index(stack[-1]) == self.chars.index(char) - 1:
+                            stack.pop()
+                        else:
+                            return i
+                    if not stack:
+                        return i
+            return -1
+
+        result = []
+        cursor_char = document.text[document.cursor_position] if document.cursor_position < len(document.text) else ''
+        
+        if cursor_char in self.chars:
+            pos = document.cursor_position
+        elif document.cursor_position > 0 and document.text[document.cursor_position - 1] in self.chars:
+            pos = document.cursor_position - 1
+        else:
+            return result
+
+        if abs(pos - document.cursor_position) <= self.max_cursor_distance:
+            matching_pos = find_matching_bracket(pos, 1 if self.chars.index(document.text[pos]) % 2 == 0 else -1)
+            if matching_pos != -1:
+                result.append(document.translate_index_to_position(pos))
+                result.append(document.translate_index_to_position(matching_pos))
+
+        return result
 
 
 class DisplayMultipleCursors(Processor):
@@ -367,7 +406,7 @@ def merge_processors(processors: list[Processor]) ->Processor:
     """
     Merge multiple `Processor` objects into one.
     """
-    pass
+    return _MergedProcessor(processors)
 
 
 class _MergedProcessor(Processor):
