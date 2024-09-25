@@ -24,4 +24,34 @@ def create_output(stdout: (TextIO | None)=None, always_prefer_tty: bool=False
         That way, tools like `print_formatted_text` will write plain text into
         that file.
     """
-    pass
+    if stdout is None:
+        stdout = sys.stdout
+
+    # Check if the output is a TTY.
+    if not stdout.isatty() and always_prefer_tty:
+        stdout = sys.stderr
+
+    if not stdout.isatty():
+        return PlainTextOutput(stdout)
+
+    term = get_term_environment_variable()
+    bell_variable = get_bell_environment_variable()
+
+    # If the PROMPT_TOOLKIT_COLOR_DEPTH environment variable is set, use that.
+    color_depth = ColorDepth.default()
+
+    if is_conemu_ansi():
+        from .conemu import ConEmuOutput
+        return ConEmuOutput(stdout)
+
+    if term in ('linux', 'eterm-color'):
+        from .vt100 import Vt100_Output
+        return Vt100_Output(stdout, color_depth=color_depth)
+
+    if term == 'windows':
+        from .win32 import Win32Output
+        return Win32Output(stdout, bell_variable=bell_variable)
+
+    # Default to VT100 output.
+    from .vt100 import Vt100_Output
+    return Vt100_Output(stdout, color_depth=color_depth)
