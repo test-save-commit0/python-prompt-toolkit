@@ -160,13 +160,29 @@ class Layout:
         """
         Focus the next visible/focusable Window.
         """
-        pass
+        windows = self.get_visible_focusable_windows()
+        if not windows:
+            return
+        try:
+            index = windows.index(self.current_window)
+            self.focus(windows[(index + 1) % len(windows)])
+        except ValueError:
+            # If the current window is not in the list, focus the first one
+            self.focus(windows[0])
 
     def focus_previous(self) ->None:
         """
         Focus the previous visible/focusable Window.
         """
-        pass
+        windows = self.get_visible_focusable_windows()
+        if not windows:
+            return
+        try:
+            index = windows.index(self.current_window)
+            self.focus(windows[(index - 1) % len(windows)])
+        except ValueError:
+            # If the current window is not in the list, focus the last one
+            self.focus(windows[-1])
 
     def walk(self) ->Iterable[Container]:
         """
