@@ -42,7 +42,20 @@ def to_formatted_text(value: AnyFormattedText, style: str='', auto_convert:
     :param auto_convert: If `True`, also accept other types, and convert them
         to a string first.
     """
-    pass
+    if callable(value):
+        value = value()
+
+    if isinstance(value, str):
+        return FormattedText([(style, value)])
+    elif isinstance(value, list):
+        return FormattedText([(style + ' ' + item_style if style else item_style, item_text) 
+                              for item_style, item_text in value])
+    elif hasattr(value, '__pt_formatted_text__'):
+        return to_formatted_text(value.__pt_formatted_text__(), style)
+    elif auto_convert:
+        return FormattedText([(style, str(value))])
+    else:
+        raise ValueError(f"Invalid formatted text: {value!r}")
 
 
 def is_formatted_text(value: object) ->TypeGuard[AnyFormattedText]:
@@ -51,7 +64,16 @@ def is_formatted_text(value: object) ->TypeGuard[AnyFormattedText]:
     statements).
     In case of a callable, it doesn't check the return type.
     """
-    pass
+    if callable(value):
+        return True
+    if isinstance(value, (str, FormattedText)):
+        return True
+    if isinstance(value, list):
+        return all(isinstance(item, tuple) and len(item) in (2, 3) and isinstance(item[0], str) and isinstance(item[1], str)
+                   for item in value)
+    if hasattr(value, '__pt_formatted_text__'):
+        return True
+    return False
 
 
 class FormattedText(StyleAndTextTuples):
@@ -89,4 +111,7 @@ def merge_formatted_text(items: Iterable[AnyFormattedText]) ->AnyFormattedText:
     """
     Merge (Concatenate) several pieces of formatted text together.
     """
-    pass
+    result: StyleAndTextTuples = []
+    for item in items:
+        result.extend(to_formatted_text(item))
+    return FormattedText(result)
