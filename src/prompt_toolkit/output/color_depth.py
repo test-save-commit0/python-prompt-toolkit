@@ -27,11 +27,24 @@ class ColorDepth(str, Enum):
         This is a way to enforce a certain color depth in all prompt_toolkit
         applications.
         """
-        pass
+        env_value = os.environ.get('PROMPT_TOOLKIT_COLOR_DEPTH')
+        if env_value:
+            try:
+                return cls(env_value)
+            except ValueError:
+                # If the value is not a valid ColorDepth, return None
+                return None
+        return None
 
     @classmethod
     def default(cls) ->ColorDepth:
         """
         Return the default color depth for the default output.
         """
-        pass
+        # First, check if there's an environment variable set
+        from_env = cls.from_env()
+        if from_env is not None:
+            return from_env
+
+        # If no environment variable is set, return the DEFAULT value
+        return cls.DEFAULT
