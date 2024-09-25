@@ -113,4 +113,48 @@ def load_mouse_bindings() ->KeyBindings:
     Key bindings, required for mouse support.
     (Mouse events enter through the key binding system.)
     """
-    pass
+    key_bindings = KeyBindings()
+
+    @key_bindings.add(Keys.Any)
+    def _(event: E) -> NotImplementedOrNone:
+        """
+        Catch mouse events.
+        """
+        if event.key_sequence[0].key == Keys.WindowsMouseEvent:
+            return _handle_mouse_event(event, system="windows")
+        elif event.key_sequence[0].key == Keys.VtMouseEvent:
+            return _handle_mouse_event(event, system="vt")
+        return NotImplemented
+
+    return key_bindings
+
+def _handle_mouse_event(event: E, system: str) -> None:
+    """
+    Handle mouse events for both Windows and VT systems.
+    """
+    # Get the parsed mouse event.
+    mouse_event = event.key_sequence[0].data
+
+    if system == "windows":
+        # Windows systems
+        x = mouse_event.position.x
+        y = mouse_event.position.y
+        button = mouse_event.button
+        event_type = mouse_event.event_type
+        modifiers = mouse_event.modifiers
+    else:
+        # VT systems
+        x = mouse_event.x
+        y = mouse_event.y
+        button = mouse_event.button
+        event_type = mouse_event.event_type
+        modifiers = mouse_event.modifiers
+
+    # Create a MouseEvent instance
+    mouse_event = MouseEvent(position=Point(x=x, y=y),
+                             event_type=event_type,
+                             button=button,
+                             modifiers=modifiers)
+
+    # Call the mouse handler
+    event.app.mouse_handlers.mouse_click(mouse_event)
