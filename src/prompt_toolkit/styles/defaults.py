@@ -102,7 +102,7 @@ def default_ui_style() ->BaseStyle:
     """
     Create a default `Style` object.
     """
-    pass
+    return Style(PROMPT_TOOLKIT_STYLE + COLORS_STYLE + WIDGETS_STYLE)
 
 
 @memoized()
@@ -110,4 +110,4 @@ def default_pygments_style() ->Style:
     """
     Create a `Style` object that contains the default Pygments style.
     """
-    pass
+    return Style.from_dict(PYGMENTS_DEFAULT_STYLE)
