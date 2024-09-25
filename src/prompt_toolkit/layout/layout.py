@@ -146,27 +146,32 @@ class Layout:
         Return all the :class:`.Window` objects which are focusable (in the
         'modal' area).
         """
-        pass
+        return (w for w in self.walk_through_modal_area() if isinstance(w, Window) and w.content.is_focusable())
 
     def get_visible_focusable_windows(self) ->list[Window]:
         """
         Return a list of :class:`.Window` objects that are focusable.
         """
-        pass
+        return [w for w in self.get_focusable_windows() if w.filter()]
 
     @property
     def current_buffer(self) ->(Buffer | None):
         """
         The currently focused :class:`~.Buffer` or `None`.
         """
-        pass
+        if isinstance(self.current_control, BufferControl):
+            return self.current_control.buffer
+        return None
 
     def get_buffer_by_name(self, buffer_name: str) ->(Buffer | None):
         """
         Look in the layout for a buffer with the given name.
         Return `None` when nothing was found.
         """
-        pass
+        for window in self.find_all_windows():
+            if isinstance(window.content, BufferControl) and window.content.buffer.name == buffer_name:
+                return window.content.buffer
+        return None
 
     @property
     def buffer_has_focus(self) ->bool:
@@ -175,20 +180,21 @@ class Layout:
         :class:`.BufferControl`. (For instance, used to determine whether the
         default key bindings should be active or not.)
         """
-        pass
+        return isinstance(self.current_control, BufferControl)
 
     @property
     def previous_control(self) ->UIControl:
         """
         Get the :class:`.UIControl` to previously had the focus.
         """
-        pass
+        return self._stack[-2].content if len(self._stack) > 1 else None
 
     def focus_last(self) ->None:
         """
         Give the focus to the last focused control.
         """
-        pass
+        if len(self._stack) > 1:
+            self._stack.pop()
 
     def focus_next(self) ->None:
         """
