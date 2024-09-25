@@ -87,13 +87,19 @@ class _CompiledGrammar:
         """
         Escape `value` to fit in the place of this variable into the grammar.
         """
-        pass
+        escape_func = self.escape_funcs.get(varname)
+        if escape_func:
+            return escape_func(value)
+        return re.escape(value)
 
     def unescape(self, varname: str, value: str) ->str:
         """
         Unescape `value`.
         """
-        pass
+        unescape_func = self.unescape_funcs.get(varname)
+        if unescape_func:
+            return unescape_func(value)
+        return value
 
     @classmethod
     def _transform(cls, root_node: Node, create_group_func: Callable[[
@@ -105,7 +111,20 @@ class _CompiledGrammar:
         :param create_group_func: A callable which takes a `Node` and returns the next
             free name for this node.
         """
-        pass
+        if isinstance(root_node, Variable):
+            return f'(?P<{create_group_func(root_node)}>.+?)'
+        elif isinstance(root_node, Regex):
+            return root_node.regex
+        elif isinstance(root_node, Repeat):
+            return f'({cls._transform(root_node.childnode, create_group_func)}){root_node.cardinality}'
+        elif isinstance(root_node, Lookahead):
+            return f'(?={cls._transform(root_node.childnode, create_group_func)})'
+        elif isinstance(root_node, NodeSequence):
+            return ''.join(cls._transform(c, create_group_func) for c in root_node.children)
+        elif isinstance(root_node, AnyNode):
+            return f"({'|'.join(cls._transform(c, create_group_func) for c in root_node.children)})"
+        else:
+            raise ValueError(f"Invalid node type: {type(root_node)}")
 
     @classmethod
     def _transform_prefix(cls, root_node: Node, create_group_func: Callable
@@ -131,7 +150,28 @@ class _CompiledGrammar:
         :param create_group_func: A callable which takes a `Node` and returns the next
             free name for this node.
         """
-        pass
+        if isinstance(root_node, Variable):
+            yield f'^(?P<{create_group_func(root_node)}>.+?)$'
+        elif isinstance(root_node, Regex):
+            yield f'^{root_node.regex}$'
+        elif isinstance(root_node, Repeat):
+            child_patterns = list(cls._transform_prefix(root_node.childnode, create_group_func))
+            for i in range(1, root_node.max_repeat + 1):
+                yield from (f'^{p * i}$' for p in child_patterns)
+        elif isinstance(root_node, Lookahead):
+            yield from (f'^(?={p})$' for p in cls._transform_prefix(root_node.childnode, create_group_func))
+        elif isinstance(root_node, NodeSequence):
+            current = '^'
+            for child in root_node.children:
+                child_patterns = list(cls._transform_prefix(child, create_group_func))
+                for pattern in child_patterns:
+                    yield f'{current}{pattern[1:-1]}$'
+                current += cls._transform(child, create_group_func)
+        elif isinstance(root_node, AnyNode):
+            for child in root_node.children:
+                yield from cls._transform_prefix(child, create_group_func)
+        else:
+            raise ValueError(f"Invalid node type: {type(root_node)}")
 
     def match(self, string: str) ->(Match | None):
         """
@@ -140,7 +180,10 @@ class _CompiledGrammar:
 
         :param string: The input string.
         """
-        pass
+        m = self._re.match(string)
+        if m:
+            return Match(string, [(self._re, m)], self._group_names_to_nodes, self.unescape_funcs)
+        return None
 
     def match_prefix(self, string: str) ->(Match | None):
         """
@@ -151,7 +194,19 @@ class _CompiledGrammar:
 
         :param string: The input string.
         """
-        pass
+        matches = []
+        for re in self._re_prefix_with_trailing_input:
+            m = re.match(string)
+            if m:
+                matches.append((re, m))
+        
+        if not matches:
+            # If no match, consider all input as trailing
+            dummy_re = re.compile(f'^(?P<{_INVALID_TRAILING_INPUT}>.*)$')
+            m = dummy_re.match(string)
+            matches.append((dummy_re, m))
+        
+        return Match(string, matches, self._group_names_to_nodes, self.unescape_funcs)
 
 
 class Match:
@@ -173,19 +228,29 @@ class Match:
         """
         Return a list of (varname, reg) tuples.
         """
-        pass
+        result = []
+        for re, match in self._re_matches:
+            for group_name, node_name in self._group_names_to_nodes.items():
+                if group_name in match.groupdict():
+                    start, end = match.span(group_name)
+                    result.append((node_name, (start, end)))
+        return result
 
     def _nodes_to_values(self) ->list[tuple[str, str, tuple[int, int]]]:
         """
         Returns list of (Node, string_value) tuples.
         """
-        pass
+        result = []
+        for varname, reg in self._nodes_to_regs():
+            value = self.string[reg[0]:reg[1]]
+            result.append((varname, value, reg))
+        return result
 
     def variables(self) ->Variables:
         """
         Returns :class:`Variables` instance.
         """
-        pass
+        return Variables(self._nodes_to_values())
 
     def trailing_input(self) ->(MatchVariable | None):
         """
@@ -193,14 +258,21 @@ class Match:
         "Trailing input" is input at the end that does not match the grammar anymore, but
         when this is removed from the end of the input, the input would be a valid string.
         """
-        pass
+        for re, match in self._re_matches:
+            if _INVALID_TRAILING_INPUT in match.groupdict():
+                start, end = match.span(_INVALID_TRAILING_INPUT)
+                return MatchVariable(_INVALID_TRAILING_INPUT, self.string[start:end], (start, end))
+        return None
 
     def end_nodes(self) ->Iterable[MatchVariable]:
         """
         Yields `MatchVariable` instances for all the nodes having their end
         position at the end of the input string.
         """
-        pass
+        input_len = len(self.string)
+        for varname, value, (start, end) in self._nodes_to_values():
+            if end == input_len:
+                yield MatchVariable(varname, value, (start, end))
 
 
 class Variables:
@@ -251,7 +323,9 @@ def compile(expression: str, escape_funcs: (EscapeFuncDict | None)=None,
     Compile grammar (given as regex string), returning a `CompiledGrammar`
     instance.
     """
-    pass
+    tokens = list(tokenize_regex(expression))
+    root_node = parse_regex(tokens)
+    return _compile_from_parse_tree(root_node, escape_funcs, unescape_funcs)
 
 
 def _compile_from_parse_tree(root_node: Node, escape_funcs: (EscapeFuncDict |
@@ -261,4 +335,4 @@ def _compile_from_parse_tree(root_node: Node, escape_funcs: (EscapeFuncDict |
     Compile grammar (given as parse tree), returning a `CompiledGrammar`
     instance.
     """
-    pass
+    return _CompiledGrammar(root_node, escape_funcs, unescape_funcs)
