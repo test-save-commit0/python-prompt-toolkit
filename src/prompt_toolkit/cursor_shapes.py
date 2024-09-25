@@ -43,11 +43,31 @@ class SimpleCursorShapeConfig(CursorShapeConfig):
         ) ->None:
         self.cursor_shape = cursor_shape
 
+    def get_cursor_shape(self, application: Application[Any]) ->CursorShape:
+        return self.cursor_shape
+
 
 class ModalCursorShapeConfig(CursorShapeConfig):
     """
     Show cursor shape according to the current input mode.
     """
+
+    def __init__(self, 
+                 emacs: CursorShape = CursorShape.BEAM,
+                 vi_insert: CursorShape = CursorShape.BEAM,
+                 vi_navigation: CursorShape = CursorShape.BLOCK) -> None:
+        self.emacs = emacs
+        self.vi_insert = vi_insert
+        self.vi_navigation = vi_navigation
+
+    def get_cursor_shape(self, application: Application[Any]) -> CursorShape:
+        if application.editing_mode == EditingMode.VI:
+            if application.vi_state.input_mode == InputMode.INSERT:
+                return self.vi_insert
+            else:
+                return self.vi_navigation
+        else:
+            return self.emacs
 
 
 class DynamicCursorShapeConfig(CursorShapeConfig):
@@ -56,10 +76,26 @@ class DynamicCursorShapeConfig(CursorShapeConfig):
         AnyCursorShapeConfig]) ->None:
         self.get_cursor_shape_config = get_cursor_shape_config
 
+    def get_cursor_shape(self, application: Application[Any]) -> CursorShape:
+        config = self.get_cursor_shape_config()
+        if isinstance(config, CursorShape):
+            return config
+        elif isinstance(config, CursorShapeConfig):
+            return config.get_cursor_shape(application)
+        else:
+            return CursorShape._NEVER_CHANGE
+
 
 def to_cursor_shape_config(value: AnyCursorShapeConfig) ->CursorShapeConfig:
     """
     Take a `CursorShape` instance or `CursorShapeConfig` and turn it into a
     `CursorShapeConfig`.
     """
-    pass
+    if isinstance(value, CursorShapeConfig):
+        return value
+    elif isinstance(value, CursorShape):
+        return SimpleCursorShapeConfig(value)
+    elif value is None:
+        return SimpleCursorShapeConfig(CursorShape._NEVER_CHANGE)
+    else:
+        raise TypeError(f"Invalid cursor shape config: {value}")
