@@ -89,21 +89,49 @@ class KeyProcessor:
         For a list of :class:`KeyPress` instances. Give the matching handlers
         that would handle this.
         """
-        pass
+        return [b for b in self._bindings.get_bindings_for_keys(key_presses) if b.filter()]
 
     def _is_prefix_of_longer_match(self, key_presses: list[KeyPress]) ->bool:
         """
         For a list of :class:`KeyPress` instances. Return True if there is any
         handler that is bound to a suffix of this keys.
         """
-        pass
+        for b in self._bindings.get_bindings_starting_with_keys(key_presses):
+            if b.filter():
+                return True
+        return False
 
     def _process(self) ->Generator[None, KeyPress, None]:
         """
         Coroutine implementing the key match algorithm. Key strokes are sent
         into this generator, and it calls the appropriate handlers.
         """
-        pass
+        buffer: list[KeyPress] = []
+        retry = False
+
+        while True:
+            if retry:
+                retry = False
+            else:
+                key_press = yield
+
+            if key_press is _Flush:
+                self._flush(buffer)
+                buffer = []
+                continue
+
+            buffer.append(key_press)
+
+            matches = self._get_matches(buffer)
+            if matches:
+                self._call_handler(matches[-1], key_sequence=buffer)
+                buffer = []
+            elif self._is_prefix_of_longer_match(buffer):
+                retry = True
+            else:
+                retry = True
+                self._flush(buffer)
+                buffer = []
 
     def feed(self, key_press: KeyPress, first: bool=False) ->None:
         """
@@ -112,14 +140,20 @@ class KeyProcessor:
 
         :param first: If true, insert before everything else.
         """
-        pass
+        if first:
+            self.input_queue.appendleft(key_press)
+        else:
+            self.input_queue.append(key_press)
 
     def feed_multiple(self, key_presses: list[KeyPress], first: bool=False
         ) ->None:
         """
         :param first: If true, insert before everything else.
         """
-        pass
+        if first:
+            self.input_queue.extendleft(reversed(key_presses))
+        else:
+            self.input_queue.extend(key_presses)
 
     def process_keys(self) ->None:
         """
@@ -130,13 +164,17 @@ class KeyProcessor:
               possible to call `feed` from inside a key binding.
               This function keeps looping until the queue is empty.
         """
-        pass
+        while self.input_queue:
+            key_press = self.input_queue.popleft()
+            self._process().send(key_press)
 
     def empty_queue(self) ->list[KeyPress]:
         """
         Empty the input queue. Return the unprocessed input.
         """
-        pass
+        key_presses = list(self.input_queue)
+        self.input_queue.clear()
+        return key_presses
 
     def _fix_vi_cursor_position(self, event: KeyPressEvent) ->None:
         """
@@ -144,14 +182,23 @@ class KeyProcessor:
         never put the cursor after the last character of a line. (Unless it's
         an empty line.)
         """
-        pass
+        app = event.app
+        buff = app.current_buffer
+        if (vi_navigation_mode() and buff.document.is_cursor_at_the_end_of_line
+            and len(buff.document.current_line) > 0):
+            buff.cursor_position -= 1
 
     def _leave_vi_temp_navigation_mode(self, event: KeyPressEvent) ->None:
         """
         If we're in Vi temporary navigation (normal) mode, return to
         insert/replace mode after executing one action.
         """
-        pass
+        app = event.app
+        if app.editing_mode == EditingMode.VI and not event.is_repeat:
+            vi_state = app.vi_state
+            if vi_state.temporary_navigation_mode:
+                vi_state.temporary_navigation_mode = False
+                app.vi_state.input_mode = vi_state.original_input_mode
 
     def _start_timeout(self) ->None:
         """
@@ -161,13 +208,22 @@ class KeyProcessor:
         and no key was pressed in the meantime, we flush all data in the queue
         and call the appropriate key binding handlers.
         """
-        pass
+        async def auto_flush() ->None:
+            await sleep(self._timeout)
+            if self._flush_wait_task and not self._flush_wait_task.done():
+                self.feed(_Flush)
+                self.process_keys()
+
+        if self._timeout is not None:
+            self._flush_wait_task = get_app().create_background_task(auto_flush())
 
     def send_sigint(self) ->None:
         """
         Send SIGINT. Immediately call the SIGINT key handler.
         """
-        pass
+        key_press = KeyPress(Keys.ControlC, '\x03')
+        self.feed(key_press)
+        self.process_keys()
 
 
 class KeyPressEvent:
@@ -200,28 +256,30 @@ class KeyPressEvent:
         """
         The current `Application` object.
         """
-        pass
+        return self._app
 
     @property
     def current_buffer(self) ->Buffer:
         """
         The current buffer.
         """
-        pass
+        return self._app.current_buffer
 
     @property
     def arg(self) ->int:
         """
         Repetition argument.
         """
-        pass
+        if self._arg:
+            return int(self._arg)
+        return 1
 
     @property
     def arg_present(self) ->bool:
         """
         True if repetition argument was explicitly provided.
         """
-        pass
+        return self._arg is not None
 
     def append_to_arg_count(self, data: str) ->None:
         """
@@ -229,9 +287,11 @@ class KeyPressEvent:
 
         :param data: the typed digit as string
         """
-        pass
+        if self._arg is None:
+            self._arg = ''
+        self._arg += data
 
     @property
     def cli(self) ->Application[Any]:
         """For backward-compatibility."""
-        pass
+        return self.app
