@@ -32,7 +32,7 @@ class Lexer(metaclass=ABCMeta):
         When this changes, `lex_document` could give a different output.
         (Only used for `DynamicLexer`.)
         """
-        pass
+        return None
 
 
 class SimpleLexer(Lexer):
@@ -46,6 +46,15 @@ class SimpleLexer(Lexer):
     def __init__(self, style: str='') ->None:
         self.style = style
 
+    def lex_document(self, document: Document) ->Callable[[int],
+        StyleAndTextTuples]:
+        def get_line(lineno: int) ->StyleAndTextTuples:
+            return [(self.style, document.lines[lineno])]
+        return get_line
+
+    def invalidation_hash(self) ->Hashable:
+        return self.style
+
 
 class DynamicLexer(Lexer):
     """
@@ -57,3 +66,14 @@ class DynamicLexer(Lexer):
     def __init__(self, get_lexer: Callable[[], Lexer | None]) ->None:
         self.get_lexer = get_lexer
         self._dummy = SimpleLexer()
+
+    def lex_document(self, document: Document) ->Callable[[int],
+        StyleAndTextTuples]:
+        lexer = self.get_lexer() or self._dummy
+        return lexer.lex_document(document)
+
+    def invalidation_hash(self) ->Hashable:
+        lexer = self.get_lexer()
+        if lexer:
+            return lexer.invalidation_hash()
+        return self._dummy.invalidation_hash()
