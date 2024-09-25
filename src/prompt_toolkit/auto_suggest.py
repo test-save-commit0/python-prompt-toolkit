@@ -87,19 +87,32 @@ class ThreadedAutoSuggest(AutoSuggest):
         """
         Run the `get_suggestion` function in a thread.
         """
-        pass
+        return await run_in_executor_with_context(
+            lambda: self.auto_suggest.get_suggestion(buff, document)
+        )
 
 
 class DummyAutoSuggest(AutoSuggest):
     """
     AutoSuggest class that doesn't return any suggestion.
     """
+    def get_suggestion(self, buffer: Buffer, document: Document) -> None:
+        return None
 
 
 class AutoSuggestFromHistory(AutoSuggest):
     """
     Give suggestions based on the lines in the history.
     """
+    def get_suggestion(self, buffer: Buffer, document: Document) -> Suggestion | None:
+        history = buffer.history
+        text = document.text.lstrip()
+        
+        for string in reversed(list(history.get_strings())):
+            for line in reversed(string.splitlines()):
+                if line.startswith(text) and line != text:
+                    return Suggestion(line[len(text):])
+        return None
 
 
 class ConditionalAutoSuggest(AutoSuggest):
@@ -112,6 +125,11 @@ class ConditionalAutoSuggest(AutoSuggest):
         self.auto_suggest = auto_suggest
         self.filter = to_filter(filter)
 
+    def get_suggestion(self, buffer: Buffer, document: Document) -> Suggestion | None:
+        if self.filter():
+            return self.auto_suggest.get_suggestion(buffer, document)
+        return None
+
 
 class DynamicAutoSuggest(AutoSuggest):
     """
@@ -123,3 +141,9 @@ class DynamicAutoSuggest(AutoSuggest):
     def __init__(self, get_auto_suggest: Callable[[], AutoSuggest | None]
         ) ->None:
         self.get_auto_suggest = get_auto_suggest
+
+    def get_suggestion(self, buffer: Buffer, document: Document) -> Suggestion | None:
+        auto_suggest = self.get_auto_suggest()
+        if auto_suggest is not None:
+            return auto_suggest.get_suggestion(buffer, document)
+        return None
