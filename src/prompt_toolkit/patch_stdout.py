@@ -48,7 +48,14 @@ def patch_stdout(raw: bool=False) ->Generator[None, None, None]:
     :param raw: (`bool`) When True, vt100 terminal escape sequences are not
                 removed/escaped.
     """
-    pass
+    original_stdout = sys.stdout
+    try:
+        proxy = StdoutProxy(raw=raw)
+        sys.stdout = proxy
+        yield
+    finally:
+        proxy.close()
+        sys.stdout = original_stdout
 
 
 class _Done:
@@ -98,14 +105,21 @@ class StdoutProxy:
         This will terminate the write thread, make sure everything is flushed
         and wait for the write thread to finish.
         """
-        pass
+        if not self.closed:
+            self._flush_queue.put(_Done())
+            self._flush_thread.join()
+            self.flush()
+            self.closed = True
 
     def _get_app_loop(self) ->(asyncio.AbstractEventLoop | None):
         """
         Return the event loop for the application currently running in our
         `AppSession`.
         """
-        pass
+        app = self.app_session.app
+        if app and app.is_running:
+            return app.loop
+        return None
 
     def _write_and_flush(self, loop: (asyncio.AbstractEventLoop | None),
         text: str) ->None:
@@ -113,7 +127,14 @@ class StdoutProxy:
         Write the given text to stdout and flush.
         If an application is running, use `run_in_terminal`.
         """
-        pass
+        def write_and_flush() ->None:
+            self._output.write_raw(text)
+            self._output.flush()
+
+        if loop is not None:
+            run_in_terminal(write_and_flush, in_executor=True)
+        else:
+            write_and_flush()
 
     def _write(self, data: str) ->None:
         """
@@ -126,10 +147,27 @@ class StdoutProxy:
               command line. Therefor, we have a little buffer which holds the
               text until a newline is written to stdout.
         """
-        pass
+        if not self.raw:
+            data = data.replace('\x1b', '?')
+
+        if '\n' in data:
+            # When there's a newline in the data, write everything before the
+            # newline, including the newline itself.
+            before, after = data.rsplit('\n', 1)
+            to_write = ''.join(self._buffer) + before + '\n'
+            self._buffer = [after]
+
+            if to_write:
+                self._flush_queue.put(to_write)
+        else:
+            # Otherwise, cache in buffer.
+            self._buffer.append(data)
 
     def flush(self) ->None:
         """
         Flush buffered output.
         """
-        pass
+        if self._buffer:
+            data = ''.join(self._buffer)
+            self._buffer = []
+            self._flush_queue.put(data)
