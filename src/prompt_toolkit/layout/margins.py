@@ -120,4 +120,30 @@ class PromptMargin(Margin):
 
     def get_width(self, get_ui_content: Callable[[], UIContent]) ->int:
         """Width to report to the `Window`."""
-        pass
+        # Get the prompt text
+        prompt_text = fragment_list_to_text(to_formatted_text(self.get_prompt()))
+        
+        # Calculate the width of the prompt
+        prompt_width = get_cwidth(prompt_text)
+        
+        # If there's a continuation function, calculate its maximum width
+        if self.get_continuation:
+            ui_content = get_ui_content()
+            line_count = ui_content.line_count
+            
+            # Check width for each line (excluding the first line)
+            continuation_widths = [
+                get_cwidth(fragment_list_to_text(to_formatted_text(
+                    self.get_continuation(prompt_width, i, False)
+                )))
+                for i in range(1, line_count)
+            ]
+            
+            # Get the maximum width of continuation lines
+            max_continuation_width = max(continuation_widths) if continuation_widths else 0
+            
+            # Return the maximum of prompt width and continuation width
+            return max(prompt_width, max_continuation_width)
+        
+        # If there's no continuation function, just return the prompt width
+        return prompt_width
