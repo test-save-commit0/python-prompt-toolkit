@@ -63,7 +63,7 @@ class BaseStyle(metaclass=ABCMeta):
             well as classnames (e.g. "class:title").
         :param default: `Attrs` to be used if no styling was defined.
         """
-        pass
+        raise NotImplementedError
 
     @abstractproperty
     def style_rules(self) ->list[tuple[str, str]]:
@@ -71,7 +71,7 @@ class BaseStyle(metaclass=ABCMeta):
         The list of style rules, used to create this style.
         (Required for `DynamicStyle` and `_MergedStyle` to work.)
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def invalidation_hash(self) ->Hashable:
@@ -80,13 +80,22 @@ class BaseStyle(metaclass=ABCMeta):
         renderer knows that something in the style changed, and that everything
         has to be redrawn.
         """
-        pass
+        raise NotImplementedError
 
 
 class DummyStyle(BaseStyle):
     """
     A style that doesn't style anything.
     """
+    def get_attrs_for_style_str(self, style_str: str, default: Attrs=DEFAULT_ATTRS) ->Attrs:
+        return default
+
+    @property
+    def style_rules(self) ->list[tuple[str, str]]:
+        return []
+
+    def invalidation_hash(self) ->Hashable:
+        return None
 
 
 class DynamicStyle(BaseStyle):
@@ -99,3 +108,16 @@ class DynamicStyle(BaseStyle):
     def __init__(self, get_style: Callable[[], BaseStyle | None]):
         self.get_style = get_style
         self._dummy = DummyStyle()
+
+    def get_attrs_for_style_str(self, style_str: str, default: Attrs=DEFAULT_ATTRS) ->Attrs:
+        style = self.get_style() or self._dummy
+        return style.get_attrs_for_style_str(style_str, default)
+
+    @property
+    def style_rules(self) ->list[tuple[str, str]]:
+        style = self.get_style() or self._dummy
+        return style.style_rules
+
+    def invalidation_hash(self) ->Hashable:
+        style = self.get_style() or self._dummy
+        return (self.get_style, style.invalidation_hash())
