@@ -19,4 +19,22 @@ def load_key_bindings() ->KeyBindingsBase:
     """
     Create a KeyBindings object that contains the default key bindings.
     """
-    pass
+    return merge_key_bindings([
+        # Load basic bindings.
+        load_basic_bindings(),
+
+        # Load emacs bindings.
+        ConditionalKeyBindings(load_emacs_bindings(), ~buffer_has_focus),
+        ConditionalKeyBindings(load_emacs_search_bindings(), ~buffer_has_focus),
+        ConditionalKeyBindings(load_emacs_shift_selection_bindings(), ~buffer_has_focus),
+
+        # Load Vi bindings.
+        ConditionalKeyBindings(load_vi_bindings(), ~buffer_has_focus),
+        ConditionalKeyBindings(load_vi_search_bindings(), ~buffer_has_focus),
+
+        # Load mouse bindings.
+        load_mouse_bindings(),
+
+        # Load CPR bindings.
+        load_cpr_bindings(),
+    ])
