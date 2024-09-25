@@ -33,7 +33,17 @@ def wait_for_handles(handles: list[HANDLE], timeout: int=INFINITE) ->(HANDLE |
     This function returns either `None` or one of the given `HANDLE` objects.
     (The return value can be tested with the `is` operator.)
     """
-    pass
+    arr = (HANDLE * len(handles))(*handles)
+    ret = windll.kernel32.WaitForMultipleObjects(
+        len(handles),
+        arr,
+        BOOL(False),
+        DWORD(timeout)
+    )
+    if ret == WAIT_TIMEOUT:
+        return None
+    else:
+        return handles[ret]
 
 
 def create_win32_event() ->HANDLE:
@@ -41,4 +51,19 @@ def create_win32_event() ->HANDLE:
     Creates a Win32 unnamed Event .
     http://msdn.microsoft.com/en-us/library/windows/desktop/ms682396(v=vs.85).aspx
     """
-    pass
+    sa = SECURITY_ATTRIBUTES()
+    sa.nLength = DWORD(sizeof(SECURITY_ATTRIBUTES))
+    sa.bInheritHandle = BOOL(True)
+    sa.lpSecurityDescriptor = None
+
+    handle = windll.kernel32.CreateEventA(
+        pointer(sa),
+        BOOL(True),   # Manual reset event
+        BOOL(False),  # Initial state = 0
+        None          # Unnamed event
+    )
+
+    if handle == 0:
+        raise WindowsError(windll.kernel32.GetLastError())
+
+    return handle
