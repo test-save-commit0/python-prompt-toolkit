@@ -186,21 +186,21 @@ class TextArea:
         """
         The `Buffer` text.
         """
-        pass
+        return self.buffer.text
 
     @property
     def document(self) ->Document:
         """
         The `Buffer` document (text + cursor position).
         """
-        pass
+        return self.buffer.document
 
     @property
     def accept_handler(self) ->(BufferAcceptHandler | None):
         """
         The accept handler. Called when the user accepts the input.
         """
-        pass
+        return self.buffer.accept_handler
 
     def __pt_container__(self) ->Container:
         return self.window
@@ -286,7 +286,15 @@ class Button:
 
     def _get_key_bindings(self) ->KeyBindings:
         """Key bindings for the Button."""
-        pass
+        kb = KeyBindings()
+
+        @kb.add(' ')
+        @kb.add('enter')
+        def _(event):
+            if self.handler is not None:
+                self.handler()
+
+        return kb
 
     def __pt_container__(self) ->Container:
         return self.window
