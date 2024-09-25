@@ -111,17 +111,50 @@ class SearchToolbar:
 
 
 class _CompletionsToolbarControl(UIControl):
-    pass
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Create the content for the completions toolbar."""
+        app = get_app()
+        if app.current_buffer.complete_state:
+            completions = app.current_buffer.complete_state.current_completions
+            index = app.current_buffer.complete_state.complete_index
+
+            # Format completions
+            formatted_completions = []
+            for i, completion in enumerate(completions):
+                if i == index:
+                    formatted_completions.append(('class:completion-toolbar.completion.current', completion.display))
+                else:
+                    formatted_completions.append(('class:completion-toolbar.completion', completion.display))
+                
+                if i < len(completions) - 1:
+                    formatted_completions.append(('class:completion-toolbar.arrow', ' > '))
+
+            return UIContent(
+                lambda i: formatted_completions,
+                line_count=1,
+                show_cursor=False
+            )
+        else:
+            return UIContent(lambda i: [], line_count=1)
+
+    def is_focusable(self) -> bool:
+        return False
 
 
 class CompletionsToolbar:
 
-    def __init__(self) ->None:
-        self.container = ConditionalContainer(content=Window(
-            _CompletionsToolbarControl(), height=1, style=
-            'class:completion-toolbar'), filter=has_completions)
+    def __init__(self) -> None:
+        self.control = _CompletionsToolbarControl()
+        self.container = ConditionalContainer(
+            content=Window(
+                self.control,
+                height=1,
+                style='class:completion-toolbar'
+            ),
+            filter=has_completions
+        )
 
-    def __pt_container__(self) ->Container:
+    def __pt_container__(self) -> Container:
         return self.container
 
 
