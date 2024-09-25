@@ -34,12 +34,22 @@ def run_in_terminal(func: Callable[[], _T], render_cli_done: bool=False,
 
     :returns: A `Future`.
     """
-    pass
+    async def run():
+        app = get_app_or_none()
+        if app is None:
+            return await run_in_executor_with_context(func) if in_executor else func()
+
+        async with in_terminal(render_cli_done):
+            if in_executor:
+                return await run_in_executor_with_context(func)
+            else:
+                return func()
+
+    return ensure_future(run())
 
 
 @asynccontextmanager
-async def in_terminal(render_cli_done: bool=False) ->AsyncGenerator[None, None
-    ]:
+async def in_terminal(render_cli_done: bool=False) ->AsyncGenerator[None, None]:
     """
     Asynchronous context manager that suspends the current application and runs
     the body in the terminal.
@@ -51,4 +61,23 @@ async def in_terminal(render_cli_done: bool=False) ->AsyncGenerator[None, None
                 call_some_function()
                 await call_some_async_function()
     """
-    pass
+    app = get_app_or_none()
+    if app is None:
+        yield
+        return
+
+    if render_cli_done:
+        app.pre_run_callables.append(app.renderer.erase)
+    else:
+        await app.run_system_command(lambda: None)
+
+    app.output.flush()
+    app._running_in_terminal = True
+
+    try:
+        yield
+    finally:
+        app._running_in_terminal = False
+        app.renderer.reset()
+        app._request_absolute_cursor_position()
+        app._redraw()
