@@ -117,7 +117,11 @@ AnyContainer = Union[Container, 'MagicContainer']
 
 def _window_too_small() ->Window:
     """Create a `Window` that displays the 'Window too small' text."""
-    pass
+    return Window(
+        FormattedTextControl(text='Window too small...'),
+        style='class:window-too-small',
+        align=WindowAlign.CENTER
+    )
 
 
 class VerticalAlign(Enum):
@@ -216,7 +220,16 @@ class HSplit(_Split):
         """
         List of child objects, including padding.
         """
-        pass
+        def create_padding():
+            return Window(width=self.padding, char=self.padding_char, style=self.padding_style)
+
+        children = []
+        for i, c in enumerate(self.children):
+            if i != 0:
+                children.append(create_padding())
+            children.append(c)
+
+        return children
 
     def write_to_screen(self, screen: Screen, mouse_handlers: MouseHandlers,
         write_position: WritePosition, parent_style: str, erase_bg: bool,
@@ -235,7 +248,18 @@ class HSplit(_Split):
         Return the heights for all rows.
         Or None when there is not enough space.
         """
-        pass
+        if self.height is not None:
+            height = to_dimension(self.height).preferred(write_position.height)
+        else:
+            height = write_position.height
+
+        children = self._all_children
+        dimensions = [c.preferred_height(write_position.width, height) for c in children]
+
+        if self.align == VerticalAlign.JUSTIFY:
+            return distribute_weights(dimensions, height)
+        else:
+            return sum_layout_dimensions(dimensions)
 
 
 class VSplit(_Split):
@@ -293,14 +317,29 @@ class VSplit(_Split):
         """
         List of child objects, including padding.
         """
-        pass
+        def create_padding():
+            return Window(height=self.padding, char=self.padding_char, style=self.padding_style)
+
+        children = []
+        for i, c in enumerate(self.children):
+            if i != 0:
+                children.append(create_padding())
+            children.append(c)
+
+        return children
 
     def _divide_widths(self, width: int) ->(list[int] | None):
         """
         Return the widths for all columns.
         Or None when there is not enough space.
         """
-        pass
+        children = self._all_children
+        dimensions = [c.preferred_width(width) for c in children]
+
+        if self.align == HorizontalAlign.JUSTIFY:
+            return distribute_weights(dimensions, width)
+        else:
+            return sum_layout_dimensions(dimensions)
 
     def write_to_screen(self, screen: Screen, mouse_handlers: MouseHandlers,
         write_position: WritePosition, parent_style: str, erase_bg: bool,
@@ -915,21 +954,33 @@ class DynamicContainer(Container):
         We call `to_container`, because `get_container` can also return a
         widget with a ``__pt_container__`` method.
         """
-        pass
+        return to_container(self.get_container())
 
 
 def to_container(container: AnyContainer) ->Container:
     """
     Make sure that the given object is a :class:`.Container`.
     """
-    pass
+    if isinstance(container, Container):
+        return container
+    elif hasattr(container, '__pt_container__'):
+        return to_container(container.__pt_container__())
+    else:
+        raise ValueError('Not a container object: %r' % (container,))
 
 
 def to_window(container: AnyContainer) ->Window:
     """
     Make sure that the given argument is a :class:`.Window`.
     """
-    pass
+    if isinstance(container, Window):
+        return container
+    else:
+        container = to_container(container)
+        if isinstance(container, Window):
+            return container
+        else:
+            raise ValueError('Not a Window object: %r' % (container,))
 
 
 def is_container(value: object) ->TypeGuard[AnyContainer]:
@@ -937,4 +988,4 @@ def is_container(value: object) ->TypeGuard[AnyContainer]:
     Checks whether the given value is a container object
     (for use in assert statements).
     """
-    pass
+    return isinstance(value, Container) or hasattr(value, '__pt_container__')
