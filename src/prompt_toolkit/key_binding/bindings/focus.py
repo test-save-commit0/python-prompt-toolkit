@@ -9,7 +9,7 @@ def focus_next(event: E) ->None:
     Focus the next visible Window.
     (Often bound to the `Tab` key.)
     """
-    pass
+    event.app.layout.focus_next()
 
 
 def focus_previous(event: E) ->None:
@@ -17,4 +17,4 @@ def focus_previous(event: E) ->None:
     Focus the previous visible Window.
     (Often bound to the `BackTab` key.)
     """
-    pass
+    event.app.layout.focus_previous()
