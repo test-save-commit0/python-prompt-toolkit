@@ -69,7 +69,17 @@ class SwapLightAndDarkStyleTransformation(StyleTransformation):
         """
         Return the `Attrs` used when opposite luminosity should be used.
         """
-        pass
+        return Attrs(
+            color=get_opposite_color(attrs.color),
+            bgcolor=get_opposite_color(attrs.bgcolor),
+            bold=attrs.bold,
+            italic=attrs.italic,
+            underline=attrs.underline,
+            strike=attrs.strike,
+            blink=attrs.blink,
+            reverse=attrs.reverse,
+            hidden=attrs.hidden
+        )
 
 
 class ReverseStyleTransformation(StyleTransformation):
@@ -129,14 +139,40 @@ class AdjustBrightnessStyleTransformation(StyleTransformation):
         """
         Parse `style.Attrs` color into RGB tuple.
         """
-        pass
+        if color.startswith('ansi'):
+            # For ANSI colors, we'll use a predefined mapping
+            r, g, b = {
+                'ansidefault': (0.5, 0.5, 0.5),
+                'ansiblack': (0, 0, 0),
+                'ansired': (0.5, 0, 0),
+                'ansigreen': (0, 0.5, 0),
+                'ansiyellow': (0.5, 0.5, 0),
+                'ansiblue': (0, 0, 0.5),
+                'ansimagenta': (0.5, 0, 0.5),
+                'ansicyan': (0, 0.5, 0.5),
+                'ansigray': (0.5, 0.5, 0.5),
+                'ansiwhite': (1, 1, 1),
+                'ansibrightblack': (0.25, 0.25, 0.25),
+                'ansibrightred': (1, 0, 0),
+                'ansibrightgreen': (0, 1, 0),
+                'ansibrightyellow': (1, 1, 0),
+                'ansibrightblue': (0, 0, 1),
+                'ansibrightmagenta': (1, 0, 1),
+                'ansibrightcyan': (0, 1, 1),
+            }.get(color, (0.5, 0.5, 0.5))  # Default to gray if not found
+        else:
+            # For hex colors
+            r = int(color[:2], 16) / 255.0
+            g = int(color[2:4], 16) / 255.0
+            b = int(color[4:], 16) / 255.0
+        return (r, g, b)
 
     def _interpolate_brightness(self, value: float, min_brightness: float,
         max_brightness: float) ->float:
         """
         Map the brightness to the (min_brightness..max_brightness) range.
         """
-        pass
+        return min_brightness + value * (max_brightness - min_brightness)
 
 
 class DummyStyleTransformation(StyleTransformation):
@@ -182,7 +218,7 @@ def merge_style_transformations(style_transformations: Sequence[
     """
     Merge multiple transformations together.
     """
-    pass
+    return _MergedStyleTransformation(list(style_transformations))
 
 
 OPPOSITE_ANSI_COLOR_NAMES = {'ansidefault': 'ansidefault', 'ansiblack':
@@ -207,4 +243,18 @@ def get_opposite_color(colorname: (str | None)) ->(str | None):
     This is used for turning color schemes that work on a light background
     usable on a dark background.
     """
-    pass
+    if colorname is None:
+        return None
+
+    if colorname in OPPOSITE_ANSI_COLOR_NAMES:
+        return OPPOSITE_ANSI_COLOR_NAMES[colorname]
+
+    try:
+        r, g, b = int(colorname[:2], 16), int(colorname[2:4], 16), int(colorname[4:], 16)
+        h, l, s = rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+        l = 1.0 - l  # Invert luminosity
+        r, g, b = [int(x * 255) for x in hls_to_rgb(h, l, s)]
+        return f'{r:02x}{g:02x}{b:02x}'
+    except ValueError:
+        # If we can't parse the color, return it unchanged
+        return colorname
