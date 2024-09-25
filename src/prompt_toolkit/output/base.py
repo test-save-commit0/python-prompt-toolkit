@@ -25,7 +25,9 @@ class Output(metaclass=ABCMeta):
     @abstractmethod
     def fileno(self) ->int:
         """Return the file descriptor to which we can write for the output."""
-        pass
+        if self.stdout is not None:
+            return self.stdout.fileno()
+        raise NotImplementedError("fileno() not implemented for this output")
 
     @abstractmethod
     def encoding(self) ->str:
@@ -35,7 +37,9 @@ class Output(metaclass=ABCMeta):
         output the data, so that the UI can provide alternatives, when
         required.)
         """
-        pass
+        if self.stdout is not None:
+            return self.stdout.encoding or 'utf-8'
+        return 'utf-8'
 
     @abstractmethod
     def write(self, data: str) ->None:
@@ -191,7 +195,7 @@ class Output(metaclass=ABCMeta):
         On Windows, we don't need this, there we have
         `get_rows_below_cursor_position`.
         """
-        pass
+        return False  # Default implementation returns False
 
     @abstractmethod
     def get_size(self) ->Size:
@@ -253,4 +257,4 @@ class DummyOutput(Output):
 
     def fileno(self) ->int:
         """There is no sensible default for fileno()."""
-        pass
+        raise NotImplementedError("DummyOutput does not have a file descriptor")
