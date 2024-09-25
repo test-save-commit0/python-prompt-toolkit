@@ -33,7 +33,7 @@ def _coord_byval(coord: COORD) ->c_long:
 
     More info: http://msdn.microsoft.com/en-us/library/windows/desktop/ms686025(v=vs.85).aspx
     """
-    pass
+    return c_long(coord.Y * 0x10000 | coord.X & 0xFFFF)
 
 
 _DEBUG_RENDER_OUTPUT = False
@@ -83,66 +83,115 @@ class Win32Output(Output):
 
     def fileno(self) ->int:
         """Return file descriptor."""
-        pass
+        return self.stdout.fileno()
 
     def encoding(self) ->str:
         """Return encoding used for stdout."""
-        pass
+        return self.stdout.encoding
 
     def write_raw(self, data: str) ->None:
         """For win32, there is no difference between write and write_raw."""
-        pass
+        self._buffer.append(data)
 
     def _winapi(self, func: Callable[..., _T], *a: object, **kw: object) ->_T:
         """
         Flush and call win API function.
         """
-        pass
+        self.flush()
+        return func(*a, **kw)
 
     def get_win32_screen_buffer_info(self) ->CONSOLE_SCREEN_BUFFER_INFO:
         """
         Return Screen buffer info.
         """
-        pass
+        info = CONSOLE_SCREEN_BUFFER_INFO()
+        success = self._winapi(windll.kernel32.GetConsoleScreenBufferInfo,
+                               self.hconsole, byref(info))
+        if success:
+            return info
+        else:
+            raise NoConsoleScreenBufferError
 
     def set_title(self, title: str) ->None:
         """
         Set terminal title.
         """
-        pass
+        self._winapi(windll.kernel32.SetConsoleTitleW, title)
 
     def erase_end_of_line(self) ->None:
-        """"""
-        pass
+        """Erase from the current cursor position to the end of the line."""
+        info = self.get_win32_screen_buffer_info()
+        if info:
+            size = info.dwSize
+            cursor_pos = info.dwCursorPosition
+            length = size.X - cursor_pos.X
+            cells_written = c_ulong()
+            self._winapi(windll.kernel32.FillConsoleOutputCharacterA,
+                         self.hconsole, c_char(b' '), length,
+                         _coord_byval(cursor_pos), byref(cells_written))
+            self._winapi(windll.kernel32.FillConsoleOutputAttribute,
+                         self.hconsole, info.wAttributes, length,
+                         _coord_byval(cursor_pos), byref(cells_written))
 
     def reset_attributes(self) ->None:
         """Reset the console foreground/background color."""
-        pass
+        self._winapi(windll.kernel32.SetConsoleTextAttribute,
+                     self.hconsole, self.default_attrs)
 
     def flush(self) ->None:
         """
         Write to output stream and flush.
         """
-        pass
+        if not self._buffer:
+            return
+
+        data = ''.join(self._buffer)
+        self._buffer = []
+
+        if _DEBUG_RENDER_OUTPUT:
+            self.LOG.write(data.encode('utf-8', 'replace'))
+            self.LOG.flush()
+
+        self.stdout.write(data)
+        self.stdout.flush()
 
     def scroll_buffer_to_prompt(self) ->None:
         """
         To be called before drawing the prompt. This should scroll the console
         to left, with the cursor at the bottom (if possible).
         """
-        pass
+        info = self.get_win32_screen_buffer_info()
+        if info:
+            sr = SMALL_RECT(
+                Left=0,
+                Top=info.srWindow.Top,
+                Right=info.dwSize.X - 1,
+                Bottom=info.dwSize.Y - 1,
+            )
+            self._winapi(windll.kernel32.SetConsoleWindowInfo,
+                         self.hconsole, True, byref(sr))
+
+            cursor_pos = COORD(x=0, y=info.dwSize.Y - 1)
+            self._winapi(windll.kernel32.SetConsoleCursorPosition,
+                         self.hconsole, _coord_byval(cursor_pos))
 
     def enter_alternate_screen(self) ->None:
         """
         Go to alternate screen buffer.
         """
-        pass
+        if not self._in_alternate_screen:
+            self._in_alternate_screen = True
+            self._winapi(windll.kernel32.SetConsoleActiveScreenBuffer,
+                         self.hconsole)
 
     def quit_alternate_screen(self) ->None:
         """
         Make stdout again the active buffer.
         """
-        pass
+        if self._in_alternate_screen:
+            self._in_alternate_screen = False
+            self._winapi(windll.kernel32.SetConsoleActiveScreenBuffer,
+                         HANDLE(windll.kernel32.GetStdHandle(STD_OUTPUT_HANDLE)))
 
     @classmethod
     def win32_refresh_window(cls) ->None:
@@ -153,7 +202,8 @@ class Win32Output(Output):
         for completion menus. When the menu disappears, it leaves traces due
         to a bug in the Windows Console. Sending a repaint request solves it.
         """
-        pass
+        hconsole = HANDLE(windll.kernel32.GetStdHandle(STD_OUTPUT_HANDLE))
+        windll.user32.InvalidateRect(hconsole, None, True)
 
     def get_default_color_depth(self) ->ColorDepth:
         """
@@ -162,7 +212,14 @@ class Win32Output(Output):
         Contrary to the Vt100 implementation, this doesn't depend on a $TERM
         variable.
         """
-        pass
+        if self.default_color_depth is not None:
+            return self.default_color_depth
+
+        # Windows 10 supports true color.
+        if sys.getwindowsversion().build >= 14393:
+            return ColorDepth.DEPTH_24_BIT
+
+        return ColorDepth.DEPTH_4_BIT
 
 
 class FOREGROUND_COLOR:
@@ -192,7 +249,25 @@ class BACKGROUND_COLOR:
 def _create_ansi_color_dict(color_cls: (type[FOREGROUND_COLOR] | type[
     BACKGROUND_COLOR])) ->dict[str, int]:
     """Create a table that maps the 16 named ansi colors to their Windows code."""
-    pass
+    return {
+        'ansidefault': color_cls.GRAY,
+        'ansiblack': color_cls.BLACK,
+        'ansired': color_cls.RED,
+        'ansigreen': color_cls.GREEN,
+        'ansiyellow': color_cls.YELLOW,
+        'ansiblue': color_cls.BLUE,
+        'ansimagenta': color_cls.MAGENTA,
+        'ansicyan': color_cls.CYAN,
+        'ansigray': color_cls.GRAY,
+        'ansibrightblack': color_cls.BLACK | color_cls.INTENSITY,
+        'ansibrightred': color_cls.RED | color_cls.INTENSITY,
+        'ansibrightgreen': color_cls.GREEN | color_cls.INTENSITY,
+        'ansibrightyellow': color_cls.YELLOW | color_cls.INTENSITY,
+        'ansibrightblue': color_cls.BLUE | color_cls.INTENSITY,
+        'ansibrightmagenta': color_cls.MAGENTA | color_cls.INTENSITY,
+        'ansibrightcyan': color_cls.CYAN | color_cls.INTENSITY,
+        'ansiwhite': color_cls.GRAY | color_cls.INTENSITY,
+    }
 
 
 FG_ANSI_COLORS = _create_ansi_color_dict(FOREGROUND_COLOR)
