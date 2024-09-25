@@ -385,11 +385,15 @@ class Vt100_Output(Output):
         """
         Asks for a cursor position report (CPR).
         """
-        pass
+        if self.enable_cpr:
+            self.write_raw('\x1b[6n')
+            self.flush()
 
     def bell(self) ->None:
         """Sound bell."""
-        pass
+        if self.enable_bell:
+            self.write_raw('\a')
+            self.flush()
 
     def get_default_color_depth(self) ->ColorDepth:
         """
@@ -399,4 +403,16 @@ class Vt100_Output(Output):
         We prefer 256 colors almost always, because this is what most terminals
         support these days, and is a good default.
         """
-        pass
+        if self.default_color_depth:
+            return self.default_color_depth
+
+        if self.term in ('linux', 'eterm-color'):
+            return ColorDepth.DEPTH_4_BIT
+
+        if '256color' in self.term:
+            return ColorDepth.DEPTH_8_BIT
+
+        if self.term in ('xterm', 'screen', 'vt100', 'vt220', 'rxvt-unicode'):
+            return ColorDepth.DEPTH_8_BIT
+
+        return ColorDepth.DEPTH_8_BIT
