@@ -65,17 +65,20 @@ class Completion:
     @property
     def display_text(self) ->str:
         """The 'display' field as plain text."""
-        pass
+        return ''.join(text for _, text in self.display)
 
     @property
     def display_meta(self) ->StyleAndTextTuples:
         """Return meta-text. (This is lazy when using a callable)."""
-        pass
+        from prompt_toolkit.formatted_text import to_formatted_text
+        if callable(self._display_meta):
+            return to_formatted_text(self._display_meta())
+        return to_formatted_text(self._display_meta)
 
     @property
     def display_meta_text(self) ->str:
         """The 'meta' field as plain text."""
-        pass
+        return ''.join(text for _, text in self.display_meta)
 
     def new_completion_from_position(self, position: int) ->Completion:
         """
@@ -84,7 +87,14 @@ class Completion:
         it needs to have a list of new completions after inserting the common
         prefix.
         """
-        pass
+        return Completion(
+            text=self.text[position:],
+            start_position=self.start_position + position,
+            display=self.display,
+            display_meta=self._display_meta,
+            style=self.style,
+            selected_style=self.selected_style
+        )
 
 
 class CompleteEvent:
@@ -143,7 +153,8 @@ class Completer(metaclass=ABCMeta):
 
         Asynchronous generator of :class:`.Completion` objects.
         """
-        pass
+        async for completion in generator_to_async_generator(lambda: self.get_completions(document, complete_event)):
+            yield completion
 
 
 class ThreadedCompleter(Completer):
@@ -165,7 +176,12 @@ class ThreadedCompleter(Completer):
         """
         Asynchronous generator of completions.
         """
-        pass
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generator_to_async_generator(lambda: self.completer.get_completions(document, complete_event))
+        )
 
     def __repr__(self) ->str:
         return f'ThreadedCompleter({self.completer!r})'
@@ -233,7 +249,12 @@ def merge_completers(completers: Sequence[Completer], deduplicate: bool=False
         so that completions that would result in the same text will be
         deduplicated.
     """
-    pass
+    from prompt_toolkit.completion.deduplicate import DeduplicateCompleter
+
+    result = _MergedCompleter(completers)
+    if deduplicate:
+        return DeduplicateCompleter(result)
+    return result
 
 
 def get_common_complete_suffix(document: Document, completions: Sequence[
@@ -241,4 +262,19 @@ def get_common_complete_suffix(document: Document, completions: Sequence[
     """
     Return the common prefix for all completions.
     """
-    pass
+    if not completions:
+        return ''
+
+    # Get all suffixes.
+    suffixes = [c.text for c in completions]
+
+    # Compute common suffix.
+    common_suffix = suffixes[0]
+    for s in suffixes[1:]:
+        common_suffix = common_suffix[:len(s)]
+        for i in range(len(common_suffix)):
+            if common_suffix[i] != s[i]:
+                common_suffix = common_suffix[:i]
+                break
+
+    return common_suffix
