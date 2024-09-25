@@ -131,11 +131,82 @@ def tokenize_regex(input: str) ->list[str]:
     :param input: string, representing a regular expression.
     :returns: List of tokens.
     """
-    pass
+    tokens = []
+    i = 0
+    while i < len(input):
+        if input[i].isspace():
+            i += 1
+            continue
+        if input[i] == '#':
+            while i < len(input) and input[i] != '\n':
+                i += 1
+            continue
+        if input[i] in '()|*+?{}[]':
+            tokens.append(input[i])
+            i += 1
+        elif input[i] == '\\':
+            if i + 1 < len(input):
+                tokens.append(input[i:i+2])
+                i += 2
+            else:
+                tokens.append(input[i])
+                i += 1
+        else:
+            start = i
+            while i < len(input) and input[i] not in '()|*+?{}[]\\' and not input[i].isspace():
+                i += 1
+            tokens.append(input[start:i])
+    return tokens
 
 
 def parse_regex(regex_tokens: list[str]) ->Node:
     """
     Takes a list of tokens from the tokenizer, and returns a parse tree.
     """
-    pass
+    def parse_sequence():
+        sequence = []
+        while tokens and tokens[0] not in ')|':
+            sequence.append(parse_atom())
+        return NodeSequence(sequence) if len(sequence) > 1 else sequence[0] if sequence else None
+
+    def parse_atom():
+        if not tokens:
+            return None
+        token = tokens.pop(0)
+        if token == '(':
+            node = parse_sequence()
+            if tokens and tokens[0] == ')':
+                tokens.pop(0)
+            return node
+        elif token == '[':
+            content = ''
+            while tokens and tokens[0] != ']':
+                content += tokens.pop(0)
+            if tokens and tokens[0] == ']':
+                tokens.pop(0)
+            return Regex(f'[{content}]')
+        elif token in '*+?':
+            return Repeat(parse_atom(), 0 if token in '*?' else 1, None if token in '*+' else 1)
+        elif token == '{':
+            min_repeat = max_repeat = ''
+            while tokens and tokens[0] not in ',}':
+                min_repeat += tokens.pop(0)
+            if tokens and tokens[0] == ',':
+                tokens.pop(0)
+                while tokens and tokens[0] != '}':
+                    max_repeat += tokens.pop(0)
+            if tokens and tokens[0] == '}':
+                tokens.pop(0)
+            return Repeat(parse_atom(), int(min_repeat) if min_repeat else 0, int(max_repeat) if max_repeat else None)
+        else:
+            return Regex(token)
+
+    tokens = regex_tokens.copy()
+    result = parse_sequence()
+    while tokens:
+        if tokens[0] == '|':
+            tokens.pop(0)
+            result = AnyNode([result, parse_sequence()])
+        else:
+            break
+    return result
