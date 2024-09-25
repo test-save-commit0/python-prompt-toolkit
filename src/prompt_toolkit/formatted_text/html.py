@@ -3,7 +3,13 @@ import xml.dom.minidom as minidom
 from string import Formatter
 from typing import Any
 from .base import FormattedText, StyleAndTextTuples
+import html
+
 __all__ = ['HTML']
+
+def html_escape(value: object) -> str:
+    """Escape special characters to their HTML entities."""
+    return html.escape(str(value), quote=True)
 
 
 class HTML:
@@ -93,7 +99,10 @@ class HTML:
         Like `str.format`, but make sure that the arguments are properly
         escaped.
         """
-        pass
+        escaped_args = tuple(html_escape(arg) for arg in args)
+        escaped_kwargs = {k: html_escape(v) for k, v in kwargs.items()}
+        formatted_value = FORMATTER.vformat(self.value, escaped_args, escaped_kwargs)
+        return HTML(formatted_value)
 
     def __mod__(self, value: object) ->HTML:
         """
@@ -106,7 +115,11 @@ class HTML:
 
 
 class HTMLFormatter(Formatter):
-    pass
+    def get_value(self, key: int | str, args: tuple, kwargs: dict) -> str:
+        value = super().get_value(key, args, kwargs)
+        if isinstance(value, HTML):
+            return value.value
+        return html_escape(value)
 
 
 FORMATTER = HTMLFormatter()
