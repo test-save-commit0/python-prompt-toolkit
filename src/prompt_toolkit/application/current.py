@@ -9,6 +9,9 @@ if TYPE_CHECKING:
 __all__ = ['AppSession', 'get_app_session', 'get_app', 'get_app_or_none',
     'set_app', 'create_app_session', 'create_app_session_from_tty']
 
+def get_app_session() -> AppSession:
+    return _current_app_session.get()
+
 
 class AppSession:
     """
@@ -60,7 +63,11 @@ def get_app() ->Application[Any]:
     (For applications like pymux where we can have more than one `Application`,
     we'll use a work-around to handle that.)
     """
-    pass
+    app = get_app_session().app
+    if app is None:
+        from .dummy import DummyApplication
+        return DummyApplication()
+    return app
 
 
 def get_app_or_none() ->(Application[Any] | None):
@@ -68,7 +75,7 @@ def get_app_or_none() ->(Application[Any] | None):
     Get the current active (running) Application, or return `None` if no
     application is running.
     """
-    pass
+    return get_app_session().app
 
 
 @contextmanager
@@ -83,7 +90,13 @@ def set_app(app: Application[Any]) ->Generator[None, None, None]:
     the case, use `contextvars.copy_context()`, or use `Application.context` to
     run it in the appropriate context.
     """
-    pass
+    session = get_app_session()
+    previous_app = session.app
+    session.app = app
+    try:
+        yield
+    finally:
+        session.app = previous_app
 
 
 @contextmanager
@@ -95,7 +108,12 @@ def create_app_session(input: (Input | None)=None, output: (Output | None)=None
     This is useful if there can be multiple individual `AppSession`s going on.
     Like in the case of an Telnet/SSH server.
     """
-    pass
+    session = AppSession(input=input, output=output)
+    token = _current_app_session.set(session)
+    try:
+        yield session
+    finally:
+        _current_app_session.reset(token)
 
 
 @contextmanager
@@ -114,4 +132,11 @@ def create_app_session_from_tty() ->Generator[AppSession, None, None]:
         with create_app_session_from_tty():
             prompt('>')
     """
-    pass
+    from prompt_toolkit.input.defaults import create_input
+    from prompt_toolkit.output.defaults import create_output
+
+    input = create_input(always_prefer_tty=True)
+    output = create_output(always_prefer_tty=True)
+
+    with create_app_session(input=input, output=output) as session:
+        yield session
