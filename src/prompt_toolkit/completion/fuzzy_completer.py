@@ -52,7 +52,24 @@ class FuzzyCompleter(Completer):
         """
         Generate formatted text for the display label.
         """
-        pass
+        match_start = fuzzy_match.start_pos
+        match_end = match_start + fuzzy_match.match_length
+        word = fuzzy_match.completion.text
+
+        result: StyleAndTextTuples = []
+        
+        # Add characters before match
+        if match_start > 0:
+            result.append(('', word[:match_start]))
+        
+        # Add matched characters
+        result.append(('class:fuzzy-match', word[match_start:match_end]))
+        
+        # Add characters after match
+        if match_end < len(word):
+            result.append(('', word[match_end:]))
+
+        return result
 
 
 class FuzzyWordCompleter(Completer):
